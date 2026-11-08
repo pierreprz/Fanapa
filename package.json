@@ -1,0 +1,17 @@
+{
+  "name": "fanapa-factures",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Appli de facturation FAN'APA (micro-entreprise d'activité physique adaptée) : factures conformes, numérotation continue, PDF verrouillé, envoi par e-mail.",
+  "type": "module",
+  "scripts": {
+    "build": "node build/build.mjs",
+    "start": "node build/serve.mjs",
+    "test": "node test/unit.test.mjs",
+    "test:e2e": "node test/e2e.mjs"
+  },
+  "devDependencies": {
+    "jspdf": "4.2.1",
+    "playwright": "1.64.1"
+  }
+}
