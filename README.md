@@ -10,7 +10,8 @@ Appli de facturation pour FAN'APA, micro-entreprise d'activité physique adapté
 - suivi des paiements, **relances** des factures en retard, avoirs, PDF « facture acquittée » pour
   les mutuelles ;
 - livre des recettes et registre des factures en CSV, encaissements par trimestre pour l'Urssaf ;
-- « Ma structure » (nom, SIRET, adresse…) **s'enregistre toute seule** pendant la saisie ;
+- « Ma structure » (nom, SIRET, adresse…) et les **clients s'enregistrent tout seuls** pendant la
+  saisie, y compris un nouveau client tapé dans une facture pas encore validée ;
 - appli installable sur le téléphone, qui fonctionne **sans réseau** et se met à jour toute seule ;
 - rappel de **sauvegarde** tant que des factures ne sont que sur l'appareil.
 

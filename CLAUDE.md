@@ -46,6 +46,16 @@ tutoiement ; tout ce que voit le client final (PDF, e-mails, relances) est au vo
   renvoie notre propre écriture (`updatedAt === S.settingsWriteId`), la copie de travail est
   conservée : sinon une ligne de prestation ajoutée puis tapée après l'enregistrement serait
   perdue. Le bouton « Enregistrer » force l'enregistrement (utile après une erreur).
+- Clients, même principe (jamais de client perdu) : la fiche « Nouveau client / Modifier » est
+  écrite dès qu'elle a un nom (`scheduleClientSave()` 0,6 s, et en refermant la fiche par la
+  croix, le fond ou Échap) ; « Supprimer » attend l'écriture en cours et coupe l'enregistrement
+  automatique. Un NOUVEAU client tapé dans une facture a sa fiche créée dans `clients/` sans
+  attendre la validation (`saveDraftClientNow()`, 1 s après la saisie et en quittant l'écran) ;
+  le brouillon la mémorise (`clientId` + `clientNew: true`) et la tient à jour, sans doublon.
+  Un client CHOISI dans la liste (`clientNew: false`) n'est mis à jour qu'à la validation, pour
+  ne pas écraser sa fiche en tapant. Décocher « Enregistrer dans mes clients » retire la fiche
+  créée depuis le brouillon si aucune facture ne la cite. `flushAll()` écrit tout (brouillon,
+  Ma structure, fiches clients) au passage en arrière-plan et à la fermeture.
 - PDF : jsPDF 4.2.1, Montserrat embarquée en base64, PDF chiffré (impression et copie
   autorisées, modification interdite). L'aperçu HTML (`paperHTML`) reproduit le PDF
   (`buildInvoicePDF`) : toute évolution de mise en page se fait dans les deux. Les PDF sont

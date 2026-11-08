@@ -371,6 +371,53 @@ try {
   assert.equal(await p4.$('#transfer-notice'), null, 'encart retiré une fois les données là');
   assert.equal((await storeOf(p4)('config/settings')).lastName, 'Exemple');
   step('iPhone, appli installée vide : encart « Tu avais déjà commencé dans Safari ? », import en un geste');
+
+  /* ================= 5. Clients conservés d'une session à l'autre ================= */
+  const ctx5 = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'fr-FR' });
+  const p5 = await ctx5.newPage();
+  watch(p5, '[5]');
+  const clientsOf = () => p5.evaluate(() => new Promise(res => {
+    const rq = indexedDB.open('fanapa-factures', 1);
+    rq.onsuccess = () => {
+      const tx = rq.result.transaction('docs'), st = tx.objectStore('docs'), k = st.getAllKeys(), v = st.getAll();
+      tx.oncomplete = () => res(k.result.map((key, i) => [String(key), v.result[i]]).filter(([key]) => key.startsWith('clients/')).map(([, val]) => val));
+    };
+  }));
+  const names = async () => (await clientsOf()).map(c => c.name).sort();
+  const until = async (cond) => { for (let i = 0; i < 50 && !(await cond()); i++) await p5.waitForTimeout(100); };
+  await p5.goto(`${BASE}/index.html#clients`);
+  await ready(p5);
+  // Fiche « Nouveau client » refermée avec la croix, sans toucher « Enregistrer »
+  await p5.click('[data-act="client-new"]');
+  await p5.fill('[data-cf="name"]', 'Mme Claire Petit');
+  await p5.fill('[data-cf="address.city"]', 'Dole');
+  await p5.click('.sheet [data-act="close"]');
+  // Client tapé dans une facture jamais validée : on quitte la facture
+  await p5.click('.tabs [data-go="nouvelle"]');
+  await p5.fill('[data-b="client.name"]', 'M. Hugo Bernard');
+  await p5.click('.tabs [data-go="clients"]');
+  await p5.waitForFunction(() => /Hugo Bernard/.test(document.querySelector('#clients-body').textContent));
+  await p5.reload();
+  await ready(p5);
+  await p5.waitForFunction(() => /Claire Petit/.test(document.querySelector('#clients-body').textContent) && /Hugo Bernard/.test(document.querySelector('#clients-body').textContent));
+  // La suite de la saisie met à jour la même fiche : pas de doublon
+  await p5.click('.tabs [data-go="nouvelle"]');
+  await p5.fill('[data-b="client.email"]', 'hugo@exemple.fr');
+  await until(async () => (await clientsOf()).some(c => c.email === 'hugo@exemple.fr'));
+  assert.deepEqual(await names(), ['M. Hugo Bernard', 'Mme Claire Petit']);
+  // Décocher « Enregistrer dans mes clients » retire la fiche créée depuis la facture
+  await p5.uncheck('[data-b="saveClient"]');
+  await until(async () => !(await names()).includes('M. Hugo Bernard'));
+  assert.deepEqual(await names(), ['Mme Claire Petit']);
+  // Supprimer une fiche juste après l'avoir modifiée : aucun enregistrement en retard ne la fait revenir
+  await p5.click('.tabs [data-go="clients"]');
+  await p5.click('[data-act="client-edit"]');
+  await p5.fill('[data-cf="email"]', 'claire@exemple.fr');
+  await p5.click('.sheet [data-act="client-del"]');
+  await p5.click('[data-act="client-del-ok"]');
+  await p5.waitForTimeout(1500);
+  assert.deepEqual(await names(), []);
+  step('clients conservés : fiche refermée sans « Enregistrer », client d’une facture non validée (sans doublon), case décochée, suppression');
 } finally {
   await browser.close();
   server.close();

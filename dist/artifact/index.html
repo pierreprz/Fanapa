@@ -1301,7 +1301,8 @@ function newDraft(extra) {
   const st = settings();
   const t = K.todayISO();
   const d = {
-    v: 1, pristine: true, clientId: null, client: blankClient(), saveClient: true,
+    // clientNew : la fiche client a été créée depuis ce brouillon (on la tient à jour pendant la saisie)
+    v: 1, pristine: true, clientId: null, client: blankClient(), saveClient: true, clientNew: false,
     // dateAuto / serviceAuto : la date suit « aujourd'hui » tant qu'elle n'a pas été choisie à la main
     issueDate: t, dateAuto: true, service: { mode: 'single', date: t, from: '', to: '' }, serviceAuto: true,
     lines: [newLine(st.catalog[0])], term: st.defaults.term, dueDate: '',
@@ -1321,6 +1322,45 @@ function freshenDraftDates() {
   if (d.serviceAuto !== false && d.service.mode !== 'period' && d.service.date !== d.issueDate) { d.service.date = d.issueDate; changed = true; }
   if (changed) saveDraftLocal();
   return changed;
+}
+/* Nouveau client tapé dans une facture : sa fiche est créée dans « Clients » dès qu'il a un nom,
+   même si la facture n'est jamais validée, puis tenue à jour pendant la saisie (même fiche, pas de
+   doublon). Un client choisi dans la liste n'est mis à jour qu'à la validation, pour ne pas écraser
+   sa fiche en tapant. */
+let draftClientTimer = null, draftClientSaving = null, draftClientAgain = false;
+function scheduleDraftClientSave() { clearTimeout(draftClientTimer); draftClientTimer = setTimeout(() => { saveDraftClientNow(); }, 1000); }
+function saveDraftClientNow() {
+  clearTimeout(draftClientTimer);
+  if (draftClientSaving) { draftClientAgain = true; return draftClientSaving; }
+  const d = S.draft;
+  if (!d || !d.saveClient || !canWrite() || !S.got.clients) return Promise.resolve(false);
+  if (d.clientId && !d.clientNew) return Promise.resolve(false);   // client choisi dans la liste
+  const clean = cleanClient(d.client);
+  if (!clean.name) return Promise.resolve(false);
+  if (!d.clientId) { d.clientId = 'c-' + uid(); d.clientNew = true; saveDraftLocal(); }
+  const id = d.clientId;
+  const prev = S.clients.find(x => x.id === id);
+  if (prev && JSON.stringify(cleanClient(prev)) === JSON.stringify(clean)) return Promise.resolve(true); // rien de neuf
+  const nowIso = new Date().toISOString();
+  const doc = Object.assign(clean, { id, createdAt: (prev && prev.createdAt) || nowIso, updatedAt: nowIso });
+  draftClientSaving = write(() => S.db.doc('clients/' + id).set(doc))
+    .then(() => true)
+    .catch(e => { toast(dbMsg(e)); return false; })
+    .finally(() => { draftClientSaving = null; if (draftClientAgain) { draftClientAgain = false; saveDraftClientNow(); } });
+  return draftClientSaving;
+}
+// Case « Enregistrer dans mes clients » : décochée, la fiche créée depuis ce brouillon est retirée
+// (sauf si une facture la cite déjà) ; recochée, elle sera recréée. Appelée deux fois par clic (input + change) : idempotente.
+function onSaveClientToggled(d, on) {
+  if (on) { scheduleDraftClientSave(); return; }
+  clearTimeout(draftClientTimer);
+  if (d.clientNew && d.clientId) {
+    const id = d.clientId;
+    d.clientId = null; d.clientNew = false;
+    if (!S.invoices.some(i => i.clientId === id)) {
+      Promise.resolve(draftClientSaving).then(() => write(() => S.db.doc('clients/' + id).delete())).catch(() => { });
+    }
+  }
 }
 function dueOf(d) {
   if (d.term === 'reception') return d.issueDate;
@@ -1890,6 +1930,8 @@ function go(view, opts) {
   if (!['factures', 'nouvelle', 'clients', 'structure'].includes(view)) view = 'factures';
   // Quitter Ma structure enregistre aussitôt ce qui a été saisi
   if (S.view === 'structure' && view !== 'structure' && S.settingsDirty) saveSettingsNow();
+  // Quitter la facture en cours : le nouveau client qui y est tapé garde sa fiche
+  if (S.view === 'nouvelle' && view !== 'nouvelle') saveDraftClientNow();
   // Revenir sur Ma structure repart de la version enregistrée (valeurs nettoyées : SIRET, IBAN…)
   if (view === 'structure' && S.view !== 'structure' && !S.settingsDirty && !S.settingsSaving && !S.saveError) S.editSettings = null;
   S.view = view;
@@ -1942,7 +1984,7 @@ function renderEditor() {
     field('E-mail (pour l’envoi)', inp('client.email', c.email, 'type="email" inputmode="email" autocomplete="off" placeholder="client@exemple.fr"')) +
     (isPro ? field('SIREN du client', inp('client.siren', c.siren, 'type="text" inputmode="numeric" maxlength="11" placeholder="9 chiffres"') + '<small id="siren-hint">Nouvelle mention liée à la facture électronique.</small>') : '') +
     '</div>' +
-    '<label class="check"><input type="checkbox" data-b="saveClient" ' + (d.saveClient ? 'checked' : '') + '> ' + (d.clientId ? 'Mettre à jour la fiche client à la validation' : 'Ajouter à mes clients à la validation') + '</label>' +
+    '<label class="check"><input type="checkbox" data-b="saveClient" ' + (d.saveClient ? 'checked' : '') + '> ' + (d.clientId && !d.clientNew ? 'Mettre à jour la fiche client à la validation' : 'Enregistrer dans mes clients') + '</label>' +
     '</div></div>' +
 
     '<div class="card"><div class="card-h"><span class="step">2</span><div><h2>Prestations</h2><p>Ce que tu factures, avec les dates</p></div></div>' +
@@ -2103,6 +2145,7 @@ async function doValidate(btn) {
   try {
     const base = draftToInvoice(d);
     const nowIso = new Date().toISOString();
+    clearTimeout(draftClientTimer); // la fiche client est écrite ci-dessous, avec la facture
     let clientId = d.clientId;
     if (d.saveClient && !clientId) clientId = 'c-' + uid();
     const inv = await write(() => claimNumber('invoice', d.issueDate, info => Object.assign({}, base, info, {
@@ -2112,7 +2155,7 @@ async function doValidate(btn) {
       const cdoc = Object.assign(cleanClient(d.client), { id: clientId, updatedAt: nowIso });
       const prev = S.clients.find(x => x.id === clientId);
       cdoc.createdAt = (prev && prev.createdAt) || nowIso;
-      write(() => S.db.doc('clients/' + clientId).set(cdoc)).catch(() => toast('La fiche client n’a pas pu être enregistrée.'));
+      Promise.resolve(draftClientSaving).then(() => write(() => S.db.doc('clients/' + clientId).set(cdoc))).catch(() => toast('La fiche client n’a pas pu être enregistrée.'));
     }
     S.draft = newDraft();
     LS.set(DRAFT_KEY, S.draft);
@@ -2516,6 +2559,8 @@ let clientEdit = null;
 function openClientForm(id) {
   const src = id ? S.clients.find(x => x.id === id) : null;
   if (id && !src) return;
+  if (clientEditDirty) saveClientEditNow();      // fiche précédente pas encore écrite
+  clientEditDirty = false;
   clientEdit = src ? deepMerge(Object.assign(blankClient(), { id: null }), clone(src)) : Object.assign(blankClient(), { id: null });
   drawClientForm();
 }
@@ -2523,7 +2568,7 @@ function drawClientForm() {
   const c = clientEdit; if (!c) return;
   const id = c.id;
   const isPro = c.type === 'pro';
-  openSheet(sheetHead(id ? 'Modifier le client' : 'Nouveau client', id ? 'Les factures déjà validées ne changent pas.' : '') +
+  openSheet(sheetHead(id ? 'Modifier le client' : 'Nouveau client', id ? 'Les factures déjà validées ne changent pas.' : 'La fiche s’enregistre toute seule dès que tu indiques son nom.') +
     '<div class="grid" id="cf">' +
     '<div class="seg" role="group" aria-label="Type de client"><button type="button" data-act="cf-type" data-v="particulier" aria-pressed="' + !isPro + '">Particulier</button><button type="button" data-act="cf-type" data-v="pro" aria-pressed="' + isPro + '">Professionnel / structure</button></div>' +
     field(isPro ? 'Raison sociale' : 'Nom et prénom', '<input type="text" data-cf="name" value="' + esc(c.name) + '" autofocus>') +
@@ -2534,21 +2579,56 @@ function drawClientForm() {
     field('E-mail', '<input type="email" inputmode="email" data-cf="email" value="' + esc(c.email) + '">') +
     (isPro ? field('SIREN', '<input type="text" inputmode="numeric" data-cf="siren" value="' + esc(c.siren) + '" placeholder="9 chiffres">') : '') +
     '<div class="btn-row">' + (id ? '<button type="button" class="btn danger" data-act="client-del" data-id="' + esc(id) + '">' + ic('trash') + 'Supprimer</button>' : '') +
-    '<button type="button" class="btn primary" style="flex:1" data-act="client-save">' + ic('check') + 'Enregistrer</button></div></div>');
+    '<button type="button" class="btn primary" style="flex:1" data-act="client-save">' + ic('check') + 'Enregistrer</button></div>' +
+    '<p class="hint" id="cf-state" style="margin:0"></p></div>',
+    () => { if (clientEditDirty) saveClientEditNow(); }); // fiche refermée (croix, fond, Échap) : on enregistre
+  renderClientFormState();
 }
+/* Fiche client : enregistrée automatiquement dès qu'elle a un nom (pendant la saisie, en
+   refermant la fiche, en quittant l'appli). Une écriture à la fois. */
+let clientEditDirty = false, clientTimer = null, clientSaving = null, clientAgain = false;
+function scheduleClientSave() { clearTimeout(clientTimer); clientTimer = setTimeout(() => { saveClientEditNow(); }, 600); }
+function saveClientEditNow() {
+  clearTimeout(clientTimer);
+  if (clientSaving) { clientAgain = true; return clientSaving; }
+  const c = clientEdit;
+  if (!c || !clientEditDirty) return Promise.resolve(true);
+  const clean = cleanClient(c);
+  if (!clean.name || !canWrite()) return Promise.resolve(false);
+  const nowIso = new Date().toISOString();
+  if (!c.id) c.id = 'c-' + uid();                 // la fiche existe désormais : les saisies suivantes la mettent à jour
+  const prev = S.clients.find(x => x.id === c.id);
+  if (!c.createdAt) c.createdAt = (prev && prev.createdAt) || nowIso;
+  const id = c.id;
+  clientEditDirty = false;                        // une saisie pendant l'écriture le repassera à true
+  renderClientFormState(true);
+  clientSaving = write(() => S.db.doc('clients/' + id).set(Object.assign(clean, { id, createdAt: c.createdAt, updatedAt: nowIso })))
+    .then(() => true)
+    .catch(e => { clientEditDirty = true; toast(dbMsg(e)); return false; })
+    .finally(() => {
+      clientSaving = null;
+      renderClientFormState();
+      if (clientAgain) { clientAgain = false; if (clientEditDirty) saveClientEditNow(); }
+    });
+  return clientSaving;
+}
+function renderClientFormState(saving) {
+  const el = $('#cf-state'); if (!el || !clientEdit) return;
+  el.textContent = saving || clientSaving ? 'Enregistrement…'
+    : clientEditDirty ? (cleanClient(clientEdit).name ? 'Enregistrement automatique…' : 'Indique au moins le nom du client.')
+    : clientEdit.id ? '✓ Fiche enregistrée automatiquement' : '';
+}
+// Bouton « Enregistrer » : enregistre tout de suite et referme la fiche
 async function saveClientForm(btn) {
   const c = clientEdit; if (!c) return;
   if (!canWrite()) { toast('Accès en lecture seule.'); return; }
-  const clean = cleanClient(c);
-  if (!clean.name) { toast('Indique au moins le nom du client.'); return; }
-  const id = c.id || 'c-' + uid();
-  const nowIso = new Date().toISOString();
-  const prev = S.clients.find(x => x.id === id);
+  if (!cleanClient(c).name) { toast('Indique au moins le nom du client.'); return; }
   if (btn) btn.disabled = true;
-  try {
-    await write(() => S.db.doc('clients/' + id).set(Object.assign(clean, { id, createdAt: (prev && prev.createdAt) || nowIso, updatedAt: nowIso })));
-    closeSheet(); toast('Client enregistré');
-  } catch (e) { toast(dbMsg(e)); if (btn) btn.disabled = false; }
+  clientEditDirty = true;
+  let ok = await saveClientEditNow();
+  if (ok && clientEditDirty) ok = await saveClientEditNow();
+  if (ok) { closeSheet(); toast('Client enregistré'); }
+  else if (btn) btn.disabled = false;
 }
 function askDeleteClient(id) {
   const c = S.clients.find(x => x.id === id); if (!c) return;
@@ -2777,7 +2857,7 @@ document.addEventListener('click', e => {
   const d = S.draft;
   switch (act) {
     case 'close': closeSheet(); if (S.view === 'nouvelle') renderTicket(); break;
-    case 'ctype': d.client.type = v; onDraftChanged(true); break;
+    case 'ctype': d.client.type = v; onDraftChanged(true); scheduleDraftClientSave(); break;
     case 'smode':
       d.service.mode = v;
       if (v === 'period' && !d.service.from) { d.service.from = d.service.date || d.issueDate; d.service.to = d.service.date || d.issueDate; }
@@ -2793,7 +2873,7 @@ document.addEventListener('click', e => {
       else d.lines.push(newLine(item));
       renderLines(); onDraftChanged(false); toast('Ligne ajoutée'); break;
     }
-    case 'client-clear': d.clientId = null; d.client = blankClient(); onDraftChanged(true); break;
+    case 'client-clear': saveDraftClientNow(); d.clientId = null; d.clientNew = false; d.client = blankClient(); onDraftChanged(true); break;
     case 'preview': {
       const info = nextInfo('invoice', d.issueDate);
       openSheet(sheetHead('Aperçu', 'Mise en page du PDF · le numéro ' + esc(info.number) + ' sera attribué à la validation') + '<div id="pv-sheet"></div><div class="btn-row" style="margin-top:14px"><button type="button" class="btn" data-act="close">Continuer à modifier</button><button type="button" class="btn primary" style="flex:1" data-act="validate">' + ic('lock') + 'Valider</button></div>');
@@ -2852,13 +2932,22 @@ document.addEventListener('click', e => {
     case 'import-ok': doImport(a); break;
     case 'client-new': openClientForm(null); break;
     case 'client-edit': openClientForm(a.dataset.id); break;
-    case 'cf-type': if (clientEdit) { clientEdit.type = v; drawClientForm(); } break;
+    case 'cf-type': if (clientEdit) { clientEdit.type = v; clientEditDirty = true; drawClientForm(); scheduleClientSave(); } break;
     case 'client-save': saveClientForm(a); break;
-    case 'client-del': askDeleteClient(a.dataset.id); break;
-    case 'client-del-ok': write(() => S.db.doc('clients/' + a.dataset.id).delete()).then(() => { closeSheet(); toast('Fiche client supprimée'); }).catch(err => toast(dbMsg(err))); break;
+    case 'client-del': { const id = a.dataset.id; saveClientEditNow().then(() => askDeleteClient(id)); break; }
+    case 'client-del-ok': {
+      const id = a.dataset.id;
+      // Plus aucun enregistrement automatique pour cette fiche, et on attend celui en cours
+      clearTimeout(clientTimer); clientEditDirty = false; clientAgain = false; clientEdit = null;
+      if (S.draft && S.draft.clientId === id) { S.draft.clientId = null; S.draft.clientNew = false; saveDraftLocal(); }
+      Promise.resolve(clientSaving).then(() => write(() => S.db.doc('clients/' + id).delete()))
+        .then(() => { closeSheet(); toast('Fiche client supprimée'); }).catch(err => toast(dbMsg(err)));
+      break;
+    }
     case 'client-bill': {
       const c = S.clients.find(x => x.id === a.dataset.id); if (!c) break;
-      S.draft.clientId = c.id; S.draft.client = Object.assign(blankClient(), clone(c)); S.draft.saveClient = true; S.draft.pristine = false;
+      saveDraftClientNow();
+      S.draft.clientId = c.id; S.draft.clientNew = false; S.draft.client = Object.assign(blankClient(), clone(c)); S.draft.saveClient = true; S.draft.pristine = false;
       saveDraftLocal(); go('nouvelle'); break;
     }
     case 'vat': S.editSettings.vat.mode = v; settingsChanged(true); break;
@@ -2879,6 +2968,8 @@ function onField(e) {
     setPath(d, t.dataset.b, val);
     if (t.dataset.b === 'issueDate') d.dateAuto = false;        // date choisie à la main : on n'y touche plus
     if (/^service\./.test(t.dataset.b)) d.serviceAuto = false;
+    if (/^client\./.test(t.dataset.b)) scheduleDraftClientSave(); // nouveau client : sa fiche se crée toute seule
+    if (t.dataset.b === 'saveClient') onSaveClientToggled(d, val);
     onDraftChanged(false);
     return;
   }
@@ -2902,7 +2993,7 @@ function onField(e) {
     settingsChanged(false);
     return;
   }
-  if (t.dataset.cf && clientEdit) { setPath(clientEdit, t.dataset.cf, t.value); return; }
+  if (t.dataset.cf && clientEdit) { setPath(clientEdit, t.dataset.cf, t.value); clientEditDirty = true; scheduleClientSave(); renderClientFormState(); return; }
   if (t.id === 'list-q') { S.q = t.value; renderList(); return; }
   if (t.id === 'client-q') { S.cq = t.value; renderClients(); return; }
   if (t.id === 'm-to' || t.id === 'm-subject' || t.id === 'm-body') { updateMailLinks(); return; }
@@ -2913,8 +3004,10 @@ document.addEventListener('change', e => {
   if (t.type === 'checkbox') { onField(e); return; }
   if (t.id === 'client-select') {
     const c = S.clients.find(x => x.id === t.value);
+    saveDraftClientNow(); // le client tapé jusqu'ici garde sa fiche
     if (c) { S.draft.clientId = c.id; S.draft.client = Object.assign(blankClient(), clone(c)); S.draft.saveClient = true; }
     else { S.draft.clientId = null; S.draft.client = blankClient(); }
+    S.draft.clientNew = false;
     onDraftChanged(true);
     return;
   }
@@ -2933,16 +3026,22 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#scrim
 // Retour au premier plan (appli installée restée ouverte) : mise à jour, date du jour, statuts « en retard »
 document.addEventListener('visibilitychange', () => {
   // Passage en arrière-plan (iPhone : l'appli peut être fermée sans prévenir) : on enregistre tout
-  if (document.visibilityState === 'hidden') { flushDraft(); if (S.settingsDirty) saveSettingsNow(); return; }
+  if (document.visibilityState === 'hidden') { flushAll(); return; }
   checkForUpdate();
   if (freshenDraftDates()) { if (S.view === 'nouvelle' && !document.body.classList.contains('typing')) renderEditor(); renderTicket(); }
   if (S.view === 'factures') renderList();
 });
-window.addEventListener('pagehide', () => { flushDraft(); if (S.settingsDirty) saveSettingsNow(); });
-// Avertissement avant de fermer : version autonome seulement (le cadre claude.ai ne l'affiche pas)
-window.addEventListener('beforeunload', e => {
+// Tout ce qui est en cours de saisie part au stockage : brouillon, Ma structure, fiches clients
+function flushAll() {
   flushDraft();
   if (S.settingsDirty) saveSettingsNow();
+  if (clientEditDirty) saveClientEditNow();
+  saveDraftClientNow();
+}
+window.addEventListener('pagehide', flushAll);
+// Avertissement avant de fermer : version autonome seulement (le cadre claude.ai ne l'affiche pas)
+window.addEventListener('beforeunload', e => {
+  flushAll();
   if (STANDALONE && (S.settingsDirty || S.settingsSaving || S.busy)) { e.preventDefault(); e.returnValue = ''; }
 });
 // Téléphone : pendant la saisie, on masque les barres du bas (voir body.typing)
