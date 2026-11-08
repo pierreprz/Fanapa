@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+<meta name="color-scheme" content="light">
 <title>Factures FAN'APA</title>
 <!--FONTS-->
 <!--HEAD_EXTRA-->
@@ -409,6 +411,32 @@ body.v-nouvelle main { padding-bottom: calc(var(--tabbar) + var(--safe-b) + 96px
 .timeline { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--muted); }
 .timeline li b { color: var(--ink); font-weight: 500; }
 
+/* ---------- Encarts : installation, sauvegarde, mise à jour ---------- */
+.notice { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; align-items: start; padding: 14px 16px; border-radius: var(--radius); margin: 0 0 14px; border: 1px solid var(--line); background: var(--paper); font-size: 14px; }
+.notice > svg.i { margin-top: 2px; color: var(--teal-deep); }
+.notice b { font-weight: 600; color: var(--navy); }
+.notice p { margin: 4px 0 0; font-size: 13.5px; color: var(--muted); }
+.notice p b { color: inherit; }
+.notice ol { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 6px; }
+.notice ol li::marker { font-family: var(--font-display); font-weight: 800; color: var(--teal-deep); }
+.notice .btn-row { grid-column: 2; margin-top: 12px; }
+.notice.warn { background: var(--warn-bg); border-color: #F3D7AE; }
+.notice.warn > svg.i { color: var(--warn); }
+.notice.info { background: var(--mist); border-color: #CFE5E0; }
+.notice .glyph { display: inline-grid; place-items: center; vertical-align: -5px; width: 24px; height: 24px; border-radius: 7px; background: var(--paper); border: 1px solid var(--line); color: #1C7CF4; }
+.notice .glyph svg.i { width: 15px; height: 15px; }
+.banner .btn { margin-left: auto; flex: none; }
+.persist { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--muted); margin: 0 0 12px; }
+.persist .dot { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 11px; font-weight: 700; color: #fff; margin-top: 1px; }
+details.alt { margin-top: 12px; border-top: 1px dashed var(--line); padding-top: 10px; }
+details.alt summary { cursor: pointer; color: var(--teal-deep); font-weight: 500; font-size: 13.5px; list-style-position: inside; }
+details.alt[open] summary { margin-bottom: 10px; }
+.ccard .due { color: var(--warn); font-weight: 500; }
+/* Téléphone : pendant la saisie, les barres fixes du bas laissent la place au clavier */
+@media (max-width: 959px) and (pointer: coarse) {
+  body.typing .tabs, body.typing .totalbar { display: none; }
+}
+
 .toast { position: fixed; left: 50%; bottom: calc(var(--tabbar) + var(--safe-b) + 18px); transform: translate(-50%, 20px); z-index: 80; background: var(--navy); color: #fff; padding: 11px 16px; border-radius: 14px; font-size: 14px; box-shadow: 0 12px 30px -10px rgba(11,56,84,.5); opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; max-width: calc(100% - 32px); }
 .toast.on { opacity: 1; transform: translate(-50%, 0); }
 body.v-nouvelle .toast { bottom: calc(var(--tabbar) + var(--safe-b) + 92px); }
@@ -479,6 +507,7 @@ body.v-nouvelle .toast { bottom: calc(var(--tabbar) + var(--safe-b) + 92px); }
 
   <main id="main">
     <div class="banner warn" id="banner" role="status" hidden></div>
+    <div class="banner info" id="update-banner" role="status" hidden></div>
 
     <!-- ===== Factures ===== -->
     <section class="view" id="view-factures" aria-labelledby="h-factures">
@@ -605,6 +634,12 @@ const ic = n => '<svg class="i" viewBox="0 0 24 24" aria-hidden="true">' + I[n] 
 
 /* ---------- Réglages par défaut ---------- */
 const NOW_YEAR = new Date().getFullYear();
+// L'appli installée peut rester ouverte des jours : l'année courante se recalcule à chaque usage
+const nowYear = () => new Date().getFullYear();
+const DRAFT_KEY = 'fanapa.draft.v1';
+const BACKUP_KEY = 'fanapa.backup.v1';          // dernière sauvegarde exportée depuis cet appareil
+const BACKUP_SNOOZE = 'fanapa.backup.snooze';
+const INSTALL_SNOOZE = 'fanapa.install.snooze';
 const DEFAULT_SETTINGS = {
   firstName: '', lastName: '', tradeName: 'FAN’APA', tagline: 'Activité Physique Adaptée & Autonomie', qualification: '',
   address: { line1: '', line2: '', zip: '', city: '' },
@@ -624,7 +659,7 @@ const DEFAULT_SETTINGS = {
 
 /* ---------- État ---------- */
 const S = {
-  cl: null, db: null, user: null, dl: null,
+  cl: null, db: null, user: null, dl: null, share: null,
   dbState: 'connecting', readOnly: false, fresh: false,
   settingsRaw: null, logoDoc: null, invoices: [], clients: [],
   got: { settings: false, invoices: false, clients: false, logo: false },
@@ -643,14 +678,26 @@ function newDraft(extra) {
   const t = K.todayISO();
   const d = {
     v: 1, pristine: true, clientId: null, client: blankClient(), saveClient: true,
-    issueDate: t, service: { mode: 'single', date: t, from: '', to: '' },
+    // dateAuto / serviceAuto : la date suit « aujourd'hui » tant qu'elle n'a pas été choisie à la main
+    issueDate: t, dateAuto: true, service: { mode: 'single', date: t, from: '', to: '' }, serviceAuto: true,
     lines: [newLine(st.catalog[0])], term: st.defaults.term, dueDate: '',
     methods: st.defaults.methods.slice(), notes: ''
   };
   return Object.assign(d, extra || {});
 }
 let draftTimer = null;
-function saveDraftLocal() { clearTimeout(draftTimer); draftTimer = setTimeout(() => LS.set('fanapa.draft.v1', S.draft), 350); }
+function saveDraftLocal() { clearTimeout(draftTimer); draftTimer = setTimeout(() => LS.set(DRAFT_KEY, S.draft), 350); }
+function flushDraft() { clearTimeout(draftTimer); if (S.draft) LS.set(DRAFT_KEY, S.draft); }
+// Un brouillon commencé un autre jour garde sinon une date périmée (et bloquerait l'ordre chronologique)
+function freshenDraftDates() {
+  const d = S.draft; if (!d) return false;
+  const t = K.todayISO();
+  let changed = false;
+  if (d.dateAuto !== false && d.issueDate !== t) { d.issueDate = t; changed = true; }
+  if (d.serviceAuto !== false && d.service.mode !== 'period' && d.service.date !== d.issueDate) { d.service.date = d.issueDate; changed = true; }
+  if (changed) saveDraftLocal();
+  return changed;
+}
 function dueOf(d) {
   if (d.term === 'reception') return d.issueDate;
   if (d.term === 'custom') return d.dueDate || d.issueDate;
@@ -686,7 +733,7 @@ function draftToInvoice(d) {
   inv.totals = K.computeTotals(inv.lines, inv.vat, 1);
   return inv;
 }
-const yearOf = iso => Number(String(iso || K.todayISO()).slice(0, 4)) || NOW_YEAR;
+const yearOf = iso => Number(String(iso || K.todayISO()).slice(0, 4)) || nowYear();
 function nextInfo(kind, iso) { return K.nextSeq(S.invoices, kind || 'invoice', settings().numbering, yearOf(iso)); }
 
 /* ---------- Statuts ---------- */
@@ -716,7 +763,9 @@ function openSheet(html, onClose) {
   const sc = $('#scrim'), sh = $('#sheet');
   lastFocus = document.activeElement;
   sh.innerHTML = '<div class="grab" aria-hidden="true"></div>' + html;
+  sh.scrollTop = 0; // une feuille s'ouvre toujours en haut, même après une feuille défilée
   sc.hidden = false; sheetOnClose = onClose || null;
+  requestAnimationFrame(() => { sh.scrollTop = 0; });
   document.body.style.overflow = 'hidden';
   setTimeout(() => { const f = sh.querySelector('[autofocus]') || sh.querySelector('.x-btn'); if (f) f.focus({ preventScroll: true }); }, 30);
 }
@@ -750,6 +799,153 @@ function renderBanner() {
   else if (S.dbState === 'error') { cls = 'bad'; html = ic('alert') + '<div><b>Connexion aux données perdue.</b> Recharge la page pour reprendre.</div>'; }
   b.className = 'banner ' + cls;
   b.innerHTML = html; b.hidden = !html;
+}
+
+/* =====================================================================
+   Version installable : service worker, mises à jour, installation,
+   sauvegardes (la version autonome garde tout sur l'appareil)
+   ===================================================================== */
+const httpOk = /^https?:$/.test(location.protocol);
+const PWA = { reg: null, deferred: null, updateReady: false, lastCheck: Date.now() };
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const coarse = () => !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+function isInstalled() {
+  try {
+    if (navigator.standalone === true) return true;
+    return !!(window.matchMedia && ['standalone', 'fullscreen', 'minimal-ui', 'window-controls-overlay'].some(m => window.matchMedia('(display-mode: ' + m + ')').matches));
+  } catch (e) { return false; }
+}
+function initPwa() {
+  if (!STANDALONE || !httpOk || !('serviceWorker' in navigator)) return;
+  let ctrl = navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // Première installation : rien à annoncer. Ensuite : une nouvelle version vient de s'activer.
+    if (ctrl) { PWA.updateReady = true; renderUpdate(); }
+    ctrl = navigator.serviceWorker.controller;
+  });
+  const register = () => navigator.serviceWorker.register('sw.js').then(r => { PWA.reg = r; }).catch(() => { });
+  if (document.readyState === 'complete') register(); else window.addEventListener('load', register, { once: true });
+}
+function checkForUpdate() {
+  if (!PWA.reg || Date.now() - PWA.lastCheck < 20 * 60 * 1000) return;
+  PWA.lastCheck = Date.now();
+  PWA.reg.update().catch(() => { });
+}
+function renderUpdate() {
+  const b = $('#update-banner'); if (!b) return;
+  b.hidden = !PWA.updateReady;
+  b.innerHTML = PWA.updateReady ? ic('up') + '<div><b>Nouvelle version de l’appli prête.</b> Recharge pour en profiter : tes factures ne bougent pas.</div><button type="button" class="btn small primary" data-act="app-reload">Mettre à jour</button>' : '';
+}
+function reloadApp() {
+  if (S.busy) { toast('Patiente un instant : une opération est en cours.'); return; }
+  if (S.settingsDirty) { toast('Enregistre d’abord Ma structure, puis mets à jour.'); go('structure'); return; }
+  flushDraft();
+  location.reload();
+}
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); PWA.deferred = e; refreshInstallSpots(); });
+window.addEventListener('appinstalled', () => { PWA.deferred = null; refreshInstallSpots(); toast('Appli installée sur ton appareil'); });
+async function promptInstall() {
+  const p = PWA.deferred; if (!p) return;
+  PWA.deferred = null;
+  try { p.prompt(); await p.userChoice; } catch (e) { /* déjà utilisé */ }
+  refreshInstallSpots();
+}
+// 'prompt' (Chrome, Edge : bouton Installer) · 'ios' (Safari : Partager → écran d'accueil) · 'android' (menu du navigateur)
+function installKind() {
+  if (!STANDALONE || !httpOk || isInstalled()) return null;
+  if (PWA.deferred) return 'prompt';
+  if (isIOS) return 'ios';
+  if (coarse()) return 'android';
+  return null;
+}
+const hasLocalData = () => !!(S.settingsRaw || S.invoices.length || S.clients.length);
+const GLYPH_SHARE = '<span class="glyph" aria-label="Partager"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M7 10H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1"/></svg></span>';
+function installSteps(kind) {
+  if (kind === 'ios') return '<ol>' +
+    '<li>Touche le bouton <b>Partager</b> ' + GLYPH_SHARE + ' de Safari, en bas de l’écran sur iPhone, en haut sur iPad (sur iOS 26 : touche d’abord <b>⋯</b>).</li>' +
+    '<li>Choisis <b>Sur l’écran d’accueil</b> (ou « Ajouter à l’écran d’accueil »). Fais défiler la liste si tu ne le vois pas.</li>' +
+    '<li>Laisse <b>Ouvrir comme app web</b> activé, puis touche <b>Ajouter</b>. Ouvre ensuite toujours l’appli depuis son icône.</li></ol>';
+  if (kind === 'android') return '<ol><li>Ouvre le menu du navigateur <b>⋮</b>.</li><li>Choisis <b>Installer l’application</b> ou <b>Ajouter à l’écran d’accueil</b>.</li></ol>';
+  return '';
+}
+function installBody(kind) {
+  let html = installSteps(kind);
+  if (kind === 'ios') {
+    html += hasLocalData()
+      ? '<p><b>Important :</b> sur iPhone, l’appli installée garde ses données à part de Safari. Exporte d’abord une sauvegarde (Ma structure → Sauvegarde), puis importe-la dans l’appli installée.</p>'
+      : '<p>Installe-la avant de commencer : tes factures seront rangées dans l’appli installée, qui marche aussi sans connexion.</p>';
+  }
+  return html;
+}
+function installNoticeHTML() {
+  const kind = installKind();
+  if (!kind) return '';
+  const later = Number(LS.get(INSTALL_SNOOZE)) || 0;
+  if (Date.now() < later) return '';
+  const title = kind === 'ios' ? 'Installe l’appli sur ton iPhone' : 'Installe l’appli sur ton appareil';
+  return '<div class="notice info" id="install-notice">' + ic('up') + '<div><b>' + title + '</b><p>Une icône sur l’écran d’accueil, une ouverture instantanée, et l’appli marche même sans réseau.</p>' + installBody(kind) + '</div>' +
+    '<div class="btn-row">' + (kind === 'prompt' ? '<button type="button" class="btn small primary" data-act="install">' + ic('dl') + 'Installer</button>' : '') +
+    '<button type="button" class="btn small ghost" data-act="install-later">Plus tard</button></div></div>';
+}
+function installCardHTML() {
+  if (!STANDALONE || !httpOk) return '';
+  const kind = installKind();
+  const head = '<div class="card-h"><div><h2>Appli sur ton téléphone</h2><p>' + (kind ? 'Installe-la pour l’ouvrir depuis l’écran d’accueil, même sans réseau' : 'Ouverture instantanée, même sans réseau') + '</p></div></div>';
+  if (isInstalled()) {
+    return '<div class="card" id="install-card">' + head + '<p class="persist" style="margin:0"><span class="dot ok">✓</span><span>Tu utilises l’appli installée. Les mises à jour arrivent toutes seules : un bandeau te propose de recharger.</span></p></div>';
+  }
+  if (!kind) {
+    return '<div class="card" id="install-card">' + head + '<p class="hint" style="margin:0">Ouvre cette adresse sur ton téléphone : <b>' + esc(location.origin + location.pathname.replace(/index\.html$/, '')) + '</b>. Sur iPhone, utilise Safari, puis « Partager → Sur l’écran d’accueil ».</p></div>';
+  }
+  return '<div class="card" id="install-card">' + head + '<div class="notice info" style="margin:0">' + ic('up') + '<div>' + installBody(kind) + '</div>' +
+    (kind === 'prompt' ? '<div class="btn-row"><button type="button" class="btn small primary" data-act="install">' + ic('dl') + 'Installer l’appli</button></div>' : '') + '</div></div>';
+}
+function refreshInstallSpots() {
+  if (S.view === 'factures') renderList();
+  const card = $('#install-card');
+  if (card) card.outerHTML = installCardHTML() || '<span id="install-card"></span>';
+}
+
+/* ---------- Sauvegardes : rappel tant que des factures ne sont que sur l'appareil ---------- */
+function lastBackup() { const b = LS.get(BACKUP_KEY); return b && b.at ? b : null; }
+// Factures validées depuis la dernière sauvegarde (toutes s'il n'y en a jamais eu)
+function backupSince() { const b = lastBackup(); return S.invoices.filter(i => !b || (i.validatedAt || '') > b.at).length; }
+function backupDue() {
+  if (!STANDALONE || !S.got.invoices || !S.invoices.length) return null;
+  const b = lastBackup();
+  const since = backupSince();
+  if (!since) return null;
+  const days = b ? Math.floor((Date.now() - Date.parse(b.at)) / 86400000) : null;
+  if (b && days < 7 && since < 10) return null;
+  const snooze = Number(LS.get(BACKUP_SNOOZE)) || 0;
+  if (Date.now() < snooze && (days == null || days < 45)) return null;
+  return { since, days, at: b && b.at };
+}
+function backupWhen() {
+  const b = lastBackup();
+  if (!b) return 'Aucune sauvegarde exportée depuis cet appareil';
+  const d = new Date(b.at);
+  return 'Dernière sauvegarde le ' + K.fmtDate(K.todayISO(d)) + ' à ' + String(d.getHours()).padStart(2, '0') + ' h ' + String(d.getMinutes()).padStart(2, '0');
+}
+function backupNoticeHTML() {
+  const due = backupDue(); if (!due) return '';
+  const many = due.since > 1;
+  const what = due.since + ' facture' + (many ? 's' : '') + (due.at ? ' depuis' : '');
+  return '<div class="notice warn" id="backup-notice">' + ic('alert') + '<div><b>Pense à sauvegarder tes factures</b><p>' + esc(backupWhen()) + ' · ' + what + '. ' +
+    (many ? 'Elles ne sont enregistrées' : 'Elle n’est enregistrée') + ' que sur cet appareil : garde une copie dans Fichiers, iCloud Drive ou Google Drive (factures à conserver 10 ans).</p></div>' +
+    '<div class="btn-row"><button type="button" class="btn small primary" data-act="backup">' + ic('dl') + 'Sauvegarder maintenant</button><button type="button" class="btn small ghost" data-act="backup-later">Plus tard</button></div></div>';
+}
+function renderPersistState() {
+  const el = $('#persist-state'); if (!el) return;
+  const put = (ok, msg) => { el.innerHTML = '<span class="dot ' + (ok ? 'ok' : 'warn') + '">' + (ok ? '✓' : '!') + '</span><span>' + esc(msg) + '</span>'; };
+  const weak = () => put(false, isIOS && !isInstalled()
+    ? 'Dans Safari, les données d’un site peu utilisé peuvent être effacées au bout de quelques semaines : installe l’appli sur l’écran d’accueil et garde des sauvegardes.'
+    : 'Le navigateur peut effacer ces données s’il manque de place : garde des sauvegardes régulières.');
+  if (isIOS && isInstalled()) { put(true, 'Appli installée : ses données ne sont pas soumises à l’effacement automatique de Safari. Attention : supprimer son icône efface aussi ses données.'); return; }
+  try {
+    if (navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then(p => (p ? put(true, 'Stockage protégé : le navigateur ne l’effacera pas pour faire de la place.') : weak())).catch(weak);
+    else weak();
+  } catch (e) { weak(); }
 }
 
 /* =====================================================================
@@ -860,10 +1056,34 @@ async function makePdfBlob(inv, paid) {
   const doc = K.buildInvoicePDF(JsPDF, inv, pdfAssets(), { paid: !!paid, protect: true });
   return doc.output('blob');
 }
+/* PDF préparés à l'avance : sur iPhone, le menu de partage doit s'ouvrir dans la foulée
+   du toucher. Générer le PDF à ce moment-là peut prendre trop longtemps : Safari refuse
+   alors le partage. On le prépare donc dès l'ouverture de la fiche ou de l'envoi. */
+const pdfCache = new Map();
+function pdfKey(inv, paid) {
+  const st = inv.status || {};
+  const logo = S.logoDoc && S.logoDoc.data ? (S.logoDoc.updatedAt || String(S.logoDoc.data.length)) : 'std';
+  return [inv.number, paid ? 'p' : '-', paid ? (st.paidAt || '') + (st.paidMethod || '') : '', logo].join('|');
+}
+function prepPdf(inv, paid) {
+  if (!inv) return Promise.reject(new Error('facture introuvable'));
+  const k = pdfKey(inv, paid);
+  if (!pdfCache.has(k)) {
+    const p = makePdfBlob(inv, paid);
+    pdfCache.set(k, p);
+    p.catch(() => pdfCache.delete(k));
+    while (pdfCache.size > 8) pdfCache.delete(pdfCache.keys().next().value);
+  }
+  return pdfCache.get(k);
+}
+function warmPdf(inv, paid) {
+  if (!inv) return;
+  setTimeout(() => { prepPdf(inv, paid).catch(() => { }); }, 380); // après l'animation de la feuille
+}
 async function savePdf(inv, paid) {
   if (!S.dl) { toast('L’enregistrement de fichiers n’est pas disponible dans cette vue.'); return false; }
   let blob;
-  try { blob = await makePdfBlob(inv, paid); }
+  try { blob = await prepPdf(inv, paid); }
   catch (e) { toast('Le module PDF ne s’est pas chargé. Vérifie ta connexion et réessaie.'); return false; }
   try {
     await S.dl.save({ filename: pdfName(inv, paid), data: blob });
@@ -880,6 +1100,20 @@ async function saveFile(name, data) {
   if (!S.dl) { toast('L’enregistrement de fichiers n’est pas disponible dans cette vue.'); return false; }
   try { await S.dl.save({ filename: name, data }); return true; }
   catch (e) { toast(e && e.code === 'declined' ? 'Enregistrement annulé.' : 'Impossible d’enregistrer le fichier ici.'); return false; }
+}
+// Téléphone : menu de partage avec le PDF joint, l'objet et le message (Mail, Gmail…)
+async function shareInvoice(inv, paid, subject, body) {
+  let blob;
+  try { blob = await prepPdf(inv, paid); }
+  catch (e) { toast('Le module PDF ne s’est pas chargé. Vérifie ta connexion et réessaie.'); return false; }
+  try {
+    await S.share.send({ filename: pdfName(inv, paid), data: blob, title: subject, text: body });
+    return true;
+  } catch (e) {
+    if (e && e.code === 'declined') { toast('Partage annulé.'); return false; }
+    toast('Partage impossible ici : le PDF va être enregistré, joins-le à ton mail.');
+    return savePdf(inv, paid);
+  }
 }
 
 /* =====================================================================
@@ -913,10 +1147,11 @@ async function connect() {
   for (let i = 0; i < 25 && (!cl || typeof cl.use !== 'function'); i++) { await sleep(200); cl = window.claude; }
   if (!cl || typeof cl.use !== 'function') { setSync('none', 'Hors ligne'); renderAll(); return; }
   S.cl = cl;
-  const [db, user, dl] = await Promise.all([
-    cl.use('db').catch(() => null), cl.use('user').catch(() => null), cl.use('downloads').catch(() => null)
+  const [db, user, dl, share] = await Promise.all([
+    cl.use('db').catch(() => null), cl.use('user').catch(() => null), cl.use('downloads').catch(() => null),
+    STANDALONE ? cl.use('share').catch(() => null) : Promise.resolve(null)
   ]);
-  S.db = db; S.user = user; S.dl = dl;
+  S.db = db; S.user = user; S.dl = dl; S.share = share;
   if (user) {
     const can = await Promise.resolve(user.canEdit()).catch(() => null);
     if (can === false) S.readOnly = true;
@@ -1007,11 +1242,11 @@ function go(view, opts) {
     toast('Modifications de Ma structure non enregistrées : pense à enregistrer.');
   }
   S.view = view;
-  document.body.className = 'v-' + view;
+  ['factures', 'nouvelle', 'clients', 'structure'].forEach(v => document.body.classList.toggle('v-' + v, v === view));
   $$('.view').forEach(v => v.classList.toggle('on', v.id === 'view-' + view));
   $$('.tabs [data-go]').forEach(b => { if (b.dataset.go === view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   if (location.hash !== '#' + view && !(opts && opts.noHash)) { try { history.replaceState(null, '', '#' + view); } catch (e) { location.hash = view; } }
-  if (view === 'nouvelle') renderEditor();
+  if (view === 'nouvelle') { freshenDraftDates(); renderEditor(); }
   renderAll();
   if (!(opts && opts.keepScroll)) window.scrollTo({ top: 0 });
 }
@@ -1192,6 +1427,7 @@ function checks(d) {
 function openValidate() {
   if (!canWrite()) { toast(S.readOnly ? 'Accès en lecture seule.' : 'Validation impossible : le stockage n’est pas disponible.'); return; }
   if (!S.got.invoices || !S.got.settings) { toast('Chargement de tes données en cours, un instant…'); return; }
+  if (freshenDraftDates()) renderEditor();
   const d = S.draft;
   const list = checks(d);
   const blocking = list.filter(x => !x.ok && x.level === 'block');
@@ -1228,7 +1464,7 @@ async function doValidate(btn) {
       write(() => S.db.doc('clients/' + clientId).set(cdoc)).catch(() => toast('La fiche client n’a pas pu être enregistrée.'));
     }
     S.draft = newDraft();
-    LS.set('fanapa.draft.v1', S.draft);
+    LS.set(DRAFT_KEY, S.draft);
     closeSheet();
     window.scrollTo({ top: 0, behavior: 'smooth' });
     // « Poum » : tampon VALIDÉE sur l'ancien numéro, puis bascule vers le suivant
@@ -1253,15 +1489,17 @@ function openSuccess(inv) {
     '<div class="grid">' +
     '<button type="button" class="btn primary block" data-act="send" data-n="' + esc(inv.number) + '" autofocus>' + ic('send') + 'Envoyer par e-mail</button>' +
     '<button type="button" class="btn block" data-act="pdf" data-n="' + esc(inv.number) + '">' + ic('dl') + 'Enregistrer le PDF</button>' +
-    '<button type="button" class="btn ghost block" data-act="close">Nouvelle facture</button></div>');
+    '<button type="button" class="btn ghost block" data-act="close">Nouvelle facture</button></div>' +
+    (backupDue() ? '<p class="hint" style="text-align:center;margin-top:12px">' + esc(backupWhen()) + '. <button type="button" class="linklike" data-act="backup">Exporter une sauvegarde</button></p>' : ''));
+  warmPdf(inv, false);
 }
 
 /* =====================================================================
    Envoi par e-mail
    ===================================================================== */
-const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-const coarse = () => !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
 const shareHint = () => STANDALONE ? (coarse() && typeof navigator.canShare === 'function') : isIOS;
+// Partage direct « PDF + message » (version autonome sur téléphone)
+const canShareMail = () => !!(S.share && typeof S.share.available === 'function' && S.share.available());
 function findInv(n) { return S.invoices.find(x => x.number === n); }
 function mailLinks(to, subject, body) {
   const crlf = body.replace(/\r?\n/g, '\r\n');
@@ -1271,31 +1509,57 @@ function mailLinks(to, subject, body) {
     outlook: 'https://outlook.live.com/mail/0/deeplink/compose?to=' + encodeURIComponent(to) + '&subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body)
   };
 }
-function openSend(n) {
+// mode 'reminder' : relance d'une facture impayée (même parcours, autre message)
+function openSend(n, mode) {
   const inv = findInv(n); if (!inv) return;
-  const m = K.buildMail(inv, settings());
+  const st = inv.status || {};
+  const reminder = mode === 'reminder' && inv.kind !== 'credit';
+  const count = (Number(st.reminders) || 0) + 1;
+  const m = reminder ? K.buildReminderMail(inv, settings(), count) : K.buildMail(inv, settings());
   const to = (inv.client && inv.client.email) || '';
-  const paid = !!(inv.status && inv.status.paidAt);
-  openSheet(sheetHead('Envoyer ' + (inv.kind === 'credit' ? 'l’avoir ' : 'la facture ') + esc(inv.number), esc(inv.client.name) + ' · ' + esc(K.fmtMoney(inv.totals.ttc))) +
-    '<div class="stepper">' +
-    '<div class="stp" id="stp-pdf"><div><h3>Enregistre le PDF</h3><p>' + (shareHint() ? (STANDALONE ? 'Le' : 'Sur iPhone, le') + ' menu de partage s’ouvre : tu peux choisir Mail ou Gmail directement, la facture est déjà jointe. Colle ensuite le message ci-dessous.' : 'Le PDF est verrouillé : il ne peut pas être modifié.') + '</p>' +
-    '<button type="button" class="btn primary" data-act="send-pdf" data-n="' + esc(n) + '"' + (paid ? ' data-paid="1"' : '') + '>' + ic('dl') + 'Enregistrer le PDF' + (paid ? ' acquitté' : '') + '</button></div></div>' +
-    '<div class="stp"><div><h3>Vérifie le message</h3>' +
-    '<div class="mailbox">' + field('À', '<input type="email" id="m-to" value="' + esc(to) + '" placeholder="adresse@du-client.fr" inputmode="email">') +
+  const paid = !reminder && !!st.paidAt;
+  const doc = inv.kind === 'credit' ? 'l’avoir' : 'la facture';
+  const dataPaid = paid ? ' data-paid="1"' : '';
+  const mailbox = '<div class="mailbox">' + field('À', '<input type="email" id="m-to" value="' + esc(to) + '" placeholder="adresse@du-client.fr" inputmode="email">') +
     field('Objet', '<input type="text" id="m-subject" value="' + esc(m.subject) + '">') +
     field('Message', '<textarea id="m-body">' + esc(m.body) + '</textarea>') +
-    '<div class="btn-row"><button type="button" class="btn small" data-act="copy" data-src="m-to">' + ic('copy') + 'Copier l’adresse</button><button type="button" class="btn small" data-act="copy" data-src="m-subject">' + ic('copy') + 'Copier l’objet</button><button type="button" class="btn small" data-act="copy" data-src="m-body">' + ic('copy') + 'Copier le message</button></div></div></div></div>' +
-    '<div class="stp"><div><h3>Ouvre ta messagerie</h3><p>Le mail s’ouvre déjà rempli : il te reste à joindre le PDF enregistré et à envoyer.</p>' +
-    '<div class="btn-row" id="mail-links"></div><p class="addr" id="m-addr"></p></div></div>' +
-    '<div class="stp' + (inv.status && inv.status.sentAt ? ' done' : '') + '"><div><h3>C’est parti ?</h3><p>Note l’envoi pour suivre tes relances.</p>' +
-    (inv.status && inv.status.sentAt ? '<p><b>Envoyée le ' + esc(K.fmtDate(inv.status.sentAt)) + '</b></p>' : '<button type="button" class="btn" data-act="mark-sent" data-n="' + esc(n) + '">' + ic('check') + 'Marquer comme envoyée</button>') +
-    '</div></div></div>');
+    '<div class="btn-row"><button type="button" class="btn small" data-act="copy" data-src="m-to">' + ic('copy') + 'Copier l’adresse</button><button type="button" class="btn small" data-act="copy" data-src="m-subject">' + ic('copy') + 'Copier l’objet</button><button type="button" class="btn small" data-act="copy" data-src="m-body">' + ic('copy') + 'Copier le message</button></div></div>';
+  const done = reminder
+    ? '<div class="stp' + (st.remindedAt === K.todayISO() ? ' done' : '') + '"><div><h3>C’est envoyé ?</h3><p>Note la relance pour garder le fil' + (st.remindedAt ? ' (dernière le ' + esc(K.fmtDate(st.remindedAt)) + ')' : '') + '.</p>' +
+      '<button type="button" class="btn" data-act="mark-reminded" data-n="' + esc(n) + '" data-c="' + count + '">' + ic('check') + 'Noter la ' + esc(K.reminderLabel(count).toLowerCase()) + '</button></div></div>'
+    : '<div class="stp' + (st.sentAt ? ' done' : '') + '"><div><h3>C’est parti ?</h3><p>Note l’envoi pour suivre tes relances.</p>' +
+      (st.sentAt ? '<p><b>Envoyée le ' + esc(K.fmtDate(st.sentAt)) + '</b></p>' : '<button type="button" class="btn" data-act="mark-sent" data-n="' + esc(n) + '">' + ic('check') + 'Marquer comme envoyée</button>') + '</div></div>';
+  let steps;
+  if (canShareMail()) {
+    // Téléphone : un seul geste, le PDF arrive joint avec le message ; l'adresse est copiée au passage
+    steps = '<div class="stp" id="stp-pdf"><div><h3>Partage ' + doc + '</h3><p>Choisis Mail ou Gmail : le PDF est joint et le message déjà écrit. ' +
+      (to ? 'L’adresse du client est copiée au même moment : colle-la dans « À ».' : 'Ajoute l’adresse du client dans « À » (ou dans le message ci-dessous pour la copier).') + '</p>' +
+      '<button type="button" class="btn primary" data-act="share-mail" data-n="' + esc(n) + '"' + dataPaid + '>' + ic('send') + 'Partager ' + doc + (paid ? ' acquittée' : '') + '</button></div></div>' +
+      '<div class="stp"><div><h3>Le message</h3><p id="m-sum">' + (to ? 'Pour ' + esc(to) + '. ' : '') + 'Objet : ' + esc(m.subject) + '</p>' +
+      '<details class="alt"' + (to ? '' : ' open') + '><summary>Voir ou modifier le message</summary>' + mailbox + '</details>' +
+      '<details class="alt"><summary>Autre méthode : PDF puis messagerie</summary><p class="hint" style="margin:0 0 8px">Enregistre le PDF, puis ouvre ta messagerie : le mail s’ouvre rempli, il reste à joindre le PDF.</p>' +
+      '<div class="btn-row" style="margin-bottom:8px"><button type="button" class="btn small" data-act="send-pdf" data-n="' + esc(n) + '"' + dataPaid + '>' + ic('dl') + 'Enregistrer le PDF</button></div>' +
+      '<div class="btn-row" id="mail-links"></div><p class="addr" id="m-addr"></p></details></div></div>' + done;
+  } else {
+    steps = '<div class="stp" id="stp-pdf"><div><h3>Enregistre le PDF</h3><p>' + (shareHint() ? (STANDALONE ? 'Le' : 'Sur iPhone, le') + ' menu de partage s’ouvre : tu peux choisir Mail ou Gmail directement, la facture est déjà jointe. Colle ensuite le message ci-dessous.' : 'Le PDF est verrouillé : il ne peut pas être modifié.') + '</p>' +
+      '<button type="button" class="btn primary" data-act="send-pdf" data-n="' + esc(n) + '"' + dataPaid + '>' + ic('dl') + 'Enregistrer le PDF' + (paid ? ' acquitté' : '') + '</button></div></div>' +
+      '<div class="stp"><div><h3>Vérifie le message</h3>' + mailbox + '</div></div>' +
+      '<div class="stp"><div><h3>Ouvre ta messagerie</h3><p>Le mail s’ouvre déjà rempli : il te reste à joindre le PDF enregistré et à envoyer.</p>' +
+      '<div class="btn-row" id="mail-links"></div><p class="addr" id="m-addr"></p></div></div>' + done;
+  }
+  const title = reminder
+    ? (count === 1 ? 'Relancer la facture ' : K.reminderLabel(count) + ' de la facture ') + esc(inv.number)
+    : 'Envoyer ' + doc + ' ' + esc(inv.number);
+  const sub = esc(inv.client.name) + ' · ' + esc(K.fmtMoney(inv.totals.ttc)) + (reminder ? ' · ' + (inv.term === 'reception' ? 'payable à réception' : 'échue le ' + esc(K.fmtDate(inv.dueDate))) : '');
+  openSheet(sheetHead(title, sub) + '<div class="stepper">' + steps + '</div>');
   updateMailLinks();
+  warmPdf(inv, paid);
 }
 function updateMailLinks() {
   const box = $('#mail-links'); if (!box) return;
   const to = $('#m-to').value.trim(), su = $('#m-subject').value, bo = $('#m-body').value;
   const L = mailLinks(to, su, bo);
+  const sum = $('#m-sum'); if (sum) sum.textContent = (to ? 'Pour ' + to + '. ' : '') + 'Objet : ' + su;
   box.innerHTML = '<a class="btn navy" href="' + esc(L.gmail) + '" target="_blank" rel="noopener">' + ic('mail') + 'Gmail</a>' +
     '<a class="btn" href="' + esc(L.mailto) + '">' + ic('mail') + 'App Mail</a>' +
     '<a class="btn" href="' + esc(L.outlook) + '" target="_blank" rel="noopener">' + ic('ext') + 'Outlook</a>';
@@ -1336,14 +1600,14 @@ function renderList() {
   if (S.db && !S.got.invoices) { body.innerHTML = '<div class="card empty">Chargement de tes factures…</div>'; return; }
   const ready = !!(T(st.firstName) && T(st.lastName) && K.validSiret(st.siret) && T(st.address.line1));
   if (!S.invoices.length) {
-    body.innerHTML = '<div class="card welcome"><img src="' + esc(logoSrc()) + '" alt="FAN’APA"><h2>Bienvenue dans tes factures</h2>' +
+    body.innerHTML = installNoticeHTML() + '<div class="card welcome"><img src="' + esc(logoSrc()) + '" alt="FAN’APA"><h2>Bienvenue dans tes factures</h2>' +
       '<ol><li class="' + (ready ? 'done' : '') + '"><div><b>Renseigne ta structure</b><span>Nom, adresse, SIRET, IBAN, assurance : 2 minutes, une seule fois.</span></div><button type="button" class="btn small" data-go="structure">' + (ready ? 'Revoir' : 'Commencer') + '</button></li>' +
       '<li><div><b>Crée ta première facture</b><span>Elle portera le numéro ' + esc(nextInfo('invoice', K.todayISO()).number) + ', puis la numérotation suit toute seule.</span></div><button type="button" class="btn small primary" data-go="nouvelle">Créer</button></li>' +
       '<li><div><b>Envoie-la en PDF</b><span>Message pré-rempli pour ton client, PDF verrouillé contre la modification.</span></div></li></ol></div>';
     $('#list-sub').textContent = 'Suivi de tes factures et encaissements';
     return;
   }
-  const years = Array.from(new Set(S.invoices.map(i => yearOf(i.issueDate)).concat([NOW_YEAR]))).sort((a, b) => b - a);
+  const years = Array.from(new Set(S.invoices.map(i => yearOf(i.issueDate)).concat([nowYear()]))).sort((a, b) => b - a);
   if (!years.includes(S.year)) S.year = years[0];
   const yi = yearInvoices(S.year);
   const billed = yi.reduce((a, i) => a + (i.totals ? i.totals.ttc : 0), 0);
@@ -1358,7 +1622,7 @@ function renderList() {
   const rows = yi.filter(i => S.filter === 'all' || statusOf(i) === S.filter)
     .filter(i => !q || (i.number + ' ' + (i.client && i.client.name) + ' ' + (i.lines || []).map(l => l.label).join(' ')).toLowerCase().includes(q));
   $('#list-sub').textContent = yi.length + ' document' + (yi.length > 1 ? 's' : '') + ' en ' + S.year;
-  body.innerHTML =
+  body.innerHTML = installNoticeHTML() + backupNoticeHTML() +
     '<div class="kpis">' +
     '<div class="kpi accent"><span>Facturé en ' + S.year + '</span><b class="num">' + K.fmtMoney(billed) + '</b><small>avoirs déduits</small></div>' +
     '<div class="kpi"><span>Encaissé en ' + S.year + '</span><b class="num">' + K.fmtMoney(cashed) + '</b><small>à déclarer à l’Urssaf</small></div>' +
@@ -1371,7 +1635,8 @@ function renderList() {
     (rows.length ? '<div class="rows">' + rows.map(i => {
       const s = statusOf(i);
       return '<button type="button" class="row" data-s="' + s + '" data-act="open" data-n="' + esc(i.number) + '"><span class="who">' + esc(i.client ? i.client.name : '') + '</span><span class="amt">' + K.fmtMoney(i.totals.ttc) + '</span>' +
-        '<span class="meta">' + esc(i.number) + ' · ' + esc(K.fmtDate(i.issueDate)) + (s === 'late' ? ' · échue le ' + esc(K.fmtDate(i.dueDate)) : '') + '</span><span class="st">' + pill(s) + '</span></button>';
+        '<span class="meta">' + esc(i.number) + ' · ' + esc(K.fmtDate(i.issueDate)) + (s === 'late' ? ' · échue le ' + esc(K.fmtDate(i.dueDate)) : '') +
+        (s === 'late' && i.status && i.status.remindedAt ? ' · relancée le ' + esc(K.fmtDate(i.status.remindedAt)) : '') + '</span><span class="st">' + pill(s) + '</span></button>';
     }).join('') + '</div>' : '<div class="card empty">Aucune facture ne correspond.</div>') +
     '</div>' + recettesHTML() + '</div>';
 }
@@ -1400,13 +1665,17 @@ function openDetail(n) {
   const isCredit = inv.kind === 'credit';
   const tl = ['<li>Validée le <b>' + esc(K.fmtDate((inv.validatedAt || '').slice(0, 10) || inv.issueDate)) + '</b></li>'];
   if (st.sentAt) tl.push('<li>Envoyée le <b>' + esc(K.fmtDate(st.sentAt)) + '</b></li>');
+  if (st.remindedAt) tl.push('<li>Relancée le <b>' + esc(K.fmtDate(st.remindedAt)) + '</b>' + (Number(st.reminders) > 1 ? ' (' + Number(st.reminders) + ' relances)' : '') + '</li>');
   if (!isCredit && !st.paidAt && !st.cancelledBy) tl.push('<li>Échéance <b>' + esc(K.dueShort(inv)) + '</b></li>');
   if (st.paidAt) tl.push('<li>Payée le <b>' + esc(K.fmtDate(st.paidAt)) + '</b>' + (st.paidMethod ? ' · ' + esc(K.methodLabel(st.paidMethod)) : '') + '</li>');
   if (st.cancelledBy) tl.push('<li>Annulée par l’avoir <b>' + esc(st.cancelledBy) + '</b></li>');
   if (isCredit && inv.creditOf) tl.push('<li>Annule la facture <b>' + esc(inv.creditOf.number) + '</b></li>');
   const w = canWrite();
   const acts = [];
-  acts.push('<button type="button" class="btn primary" data-act="send" data-n="' + esc(n) + '">' + ic('send') + 'Envoyer</button>');
+  const remind = '<button type="button" class="btn' + (s === 'late' && st.sentAt ? ' primary' : '') + '" data-act="remind" data-n="' + esc(n) + '">' + ic('send') + 'Relancer</button>';
+  if (s === 'late' && st.sentAt) acts.push(remind); // déjà envoyée et échue : la relance passe en premier
+  acts.push('<button type="button" class="btn' + (s === 'late' && st.sentAt ? '' : ' primary') + '" data-act="send" data-n="' + esc(n) + '">' + ic('send') + (st.sentAt ? 'Renvoyer' : 'Envoyer') + '</button>');
+  if (s === 'late' && !st.sentAt) acts.push(remind);
   acts.push('<button type="button" class="btn" data-act="pdf" data-n="' + esc(n) + '">' + ic('dl') + 'PDF</button>');
   if (!isCredit && st.paidAt) acts.push('<button type="button" class="btn" data-act="pdf-paid" data-n="' + esc(n) + '">' + ic('dl') + 'PDF acquitté</button>');
   if (!isCredit && !st.cancelledBy && w) acts.push(st.paidAt
@@ -1419,6 +1688,7 @@ function openDetail(n) {
     '<div class="detail-actions">' + acts.join('') + '</div>' +
     (!isCredit && st.paidAt ? '<p class="hint" style="margin:-4px 0 12px">Le PDF acquitté porte la mention « Facture acquittée » : pratique pour un remboursement de mutuelle.</p>' : '') +
     paperHTML(inv, { paid: !!st.paidAt }));
+  warmPdf(inv, !isCredit && !!st.paidAt);
 }
 function openPay(n) {
   const inv = findInv(n); if (!inv) return;
@@ -1501,9 +1771,23 @@ function exportFactures() {
   });
   saveFile('Registre-des-factures_' + y + '.csv', K.toCSV(rows));
 }
-function exportBackup() {
-  const data = { app: 'fanapa-factures', exportedAt: new Date().toISOString(), settings: S.settingsRaw, clients: S.clients, invoices: S.invoices };
-  saveFile('Sauvegarde-FANAPA_' + K.todayISO() + '.json', JSON.stringify(data, null, 2));
+const LOGO_RE = /^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/; // formats que jsPDF sait intégrer
+function cleanLogo(l) {
+  if (!l || typeof l !== 'object' || typeof l.data !== 'string' || l.data.length > 300000 || !LOGO_RE.test(l.data)) return null;
+  const w = Math.round(Number(l.w)), h = Math.round(Number(l.h));
+  if (!(w > 0 && h > 0 && w <= 4000 && h <= 4000)) return null;
+  return { data: l.data, w, h, format: /^data:image\/png/.test(l.data) ? 'PNG' : 'JPEG', updatedAt: typeof l.updatedAt === 'string' ? l.updatedAt.slice(0, 40) : new Date().toISOString() };
+}
+async function exportBackup() {
+  const exportedAt = new Date().toISOString();
+  const data = { app: 'fanapa-factures', version: 2, exportedAt, settings: S.settingsRaw, logo: cleanLogo(S.logoDoc), clients: S.clients, invoices: S.invoices };
+  const ok = await saveFile('Sauvegarde-FANAPA_' + K.todayISO() + '.json', JSON.stringify(data, null, 2));
+  if (!ok) return;
+  LS.set(BACKUP_KEY, { at: exportedAt, count: S.invoices.length });
+  LS.del(BACKUP_SNOOZE);
+  toast('Sauvegarde exportée : range-la en lieu sûr (Fichiers, iCloud Drive, Google Drive…)');
+  renderAll();
+  if (S.view === 'structure') { const keep = window.scrollY; renderSettings('redraw'); window.scrollTo({ top: keep }); }
 }
 const ID_RE = /^[A-Za-z0-9_.~:@+-]{1,120}$/;
 let pendingImport = null;
@@ -1521,12 +1805,13 @@ async function onBackupFile(file) {
   const haveC = new Set(S.clients.map(c => c.id));
   const clients = (Array.isArray(data.clients) ? data.clients : []).filter(c => c && ID_RE.test(String(c.id || '')) && c.name && !haveC.has(c.id));
   const settingsIn = data.settings && typeof data.settings === 'object' && !Array.isArray(data.settings) ? data.settings : null;
-  pendingImport = { invoices, clients, settings: settingsIn };
+  const logoIn = cleanLogo(data.logo);
+  pendingImport = { invoices, clients, settings: settingsIn, logo: logoIn, exportedAt: typeof data.exportedAt === 'string' ? data.exportedAt : '' };
   const when = K.fmtDate(String(data.exportedAt || '').slice(0, 10));
   openSheet(sheetHead('Importer cette sauvegarde ?', when ? 'Sauvegarde exportée le ' + esc(when) : '') +
     '<ul class="checklist"><li><div>' + invoices.length + ' facture(s) ou avoir(s) à ajouter' + (skipped ? '<small>' + skipped + ' déjà présent(s) ou illisible(s) : ignoré(s)</small>' : '') + '</div></li>' +
     '<li><div>' + clients.length + ' client(s) à ajouter</div></li></ul>' +
-    (settingsIn ? '<label class="check" style="margin-bottom:14px"><input type="checkbox" id="imp-settings"' + (S.settingsRaw ? '' : ' checked') + '> Remplacer aussi « Ma structure » par celle de la sauvegarde</label>' : '') +
+    (settingsIn ? '<label class="check" style="margin-bottom:14px"><input type="checkbox" id="imp-settings"' + (S.settingsRaw ? '' : ' checked') + '> Remplacer aussi « Ma structure »' + (logoIn ? ' et le logo' : '') + ' par ceux de la sauvegarde</label>' : '') +
     '<p class="hint" style="margin:0 0 12px">Les factures déjà présentes ne sont jamais modifiées.</p>' +
     '<div class="btn-row"><button type="button" class="btn" data-act="close">Annuler</button><button type="button" class="btn primary" style="flex:1" data-act="import-ok">' + ic('up') + 'Importer</button></div>');
 }
@@ -1541,11 +1826,17 @@ async function doImport(btn) {
     if (p.settings && box && box.checked) {
       await write(() => S.db.doc('config/settings').set(p.settings));
       S.settingsRaw = p.settings; S.editSettings = null; S.settingsDirty = false;
+      if (p.logo) { await write(() => S.db.doc('config/logo').set(p.logo)); S.logoDoc = p.logo; }
     }
+    // Les factures importées sont, par définition, déjà dans une sauvegarde
+    const b = lastBackup();
+    if (p.exportedAt && /^\d{4}-\d{2}-\d{2}T/.test(p.exportedAt) && (!b || b.at < p.exportedAt)) LS.set(BACKUP_KEY, { at: p.exportedAt, count: S.invoices.length + n });
     pendingImport = null;
     closeSheet();
     toast('Sauvegarde importée : ' + n + ' document(s) ajouté(s)');
     renderAll();
+    // Le formulaire affiché doit montrer « Ma structure » importée (ou rester tel quel s'il était en cours d'édition)
+    if (S.view === 'structure') renderSettings(S.settingsDirty ? 'redraw' : 'reset');
   } catch (e) { toast(dbMsg(e)); if (btn) { btn.disabled = false; btn.textContent = 'Réessayer'; } }
   finally { S.busy = false; }
 }
@@ -1561,7 +1852,11 @@ function renderClients() {
   if (!S.clients.length) { box.innerHTML = '<div class="card empty">Aucun client pour l’instant. Ils s’ajoutent tout seuls quand tu valides une facture, ou avec « Nouveau client ».</div>'; return; }
   box.innerHTML = list.length ? list.map(c => {
     const n = S.invoices.filter(i => i.clientId === c.id && i.kind !== 'credit').length;
-    return '<div class="ccard"><div style="min-width:0"><b>' + esc(c.name) + '</b><span>' + (c.type === 'pro' ? 'Professionnel' : 'Particulier') + (c.address && c.address.city ? ' · ' + esc(c.address.city) : '') + (n ? ' · ' + n + ' facture' + (n > 1 ? 's' : '') : '') + '</span>' + (c.email ? '<br><span>' + esc(c.email) + '</span>' : '') + '</div>' +
+    const open = S.invoices.filter(i => i.clientId === c.id && ['todo', 'sent', 'late'].includes(statusOf(i)));
+    const due = open.reduce((a, i) => a + i.totals.ttc, 0);
+    const late = open.some(i => statusOf(i) === 'late');
+    return '<div class="ccard"><div style="min-width:0"><b>' + esc(c.name) + '</b><span>' + (c.type === 'pro' ? 'Professionnel' : 'Particulier') + (c.address && c.address.city ? ' · ' + esc(c.address.city) : '') + (n ? ' · ' + n + ' facture' + (n > 1 ? 's' : '') : '') + '</span>' + (c.email ? '<br><span>' + esc(c.email) + '</span>' : '') +
+      (due ? '<br><span class="' + (late ? 'due' : '') + '">' + K.fmtMoney(due) + ' à encaisser' + (late ? ' · en retard' : '') + '</span>' : '') + '</div>' +
       '<div class="btn-row"><button type="button" class="btn small primary" data-act="client-bill" data-id="' + esc(c.id) + '">Facturer</button><button type="button" class="btn small" data-act="client-edit" data-id="' + esc(c.id) + '" aria-label="Modifier ' + esc(c.name) + '">' + ic('edit') + '</button></div></div>';
   }).join('') : '<div class="card empty">Aucun client ne correspond.</div>';
 }
@@ -1633,8 +1928,10 @@ function renderSettings(mode) {
   const st = S.editSettings;
   if (!mode && box.firstChild && (S.settingsDirty || box.contains(document.activeElement))) { updateSettingsHints(); return; }
   const rd = readiness(st);
-  const maxSeq = (() => { const inf = K.nextSeq(S.invoices, 'invoice', Object.assign({}, st.numbering, { start: 1 }), NOW_YEAR); return inf.seq; })();
-  const next = K.nextSeq(S.invoices, 'invoice', st.numbering, NOW_YEAR);
+  const Y = nowYear();
+  const maxSeq = (() => { const inf = K.nextSeq(S.invoices, 'invoice', Object.assign({}, st.numbering, { start: 1 }), Y); return inf.seq; })();
+  const next = K.nextSeq(S.invoices, 'invoice', st.numbering, Y);
+  const bk = lastBackup(), bkSince = backupSince();
   box.innerHTML =
     '<div class="set-grid">' +
     '<div class="card"><div class="card-h"><div><h2>Prête à facturer ?</h2><p>Les points rouges bloquent la validation des factures.</p></div></div><ul class="readiness" id="readiness">' +
@@ -1667,7 +1964,7 @@ function renderSettings(mode) {
     '<div class="card"><div class="card-h"><span class="step">5</span><div><h2>Numérotation</h2><p>Continue, sans trou ni doublon, une série par an</p></div></div>' +
     '<div style="margin-bottom:12px"><span class="next-preview" id="next-prev">' + esc(next.number) + ' <small>prochaine facture</small></span></div>' +
     '<div class="grid g3">' + sf('Préfixe factures', 'numbering.prefix', 'type="text" maxlength="6" autocapitalize="characters"') + sf('Préfixe avoirs', 'numbering.creditPrefix', 'type="text" maxlength="6" autocapitalize="characters"') +
-    field('Démarrer à', '<input data-s="numbering.start" type="text" inputmode="numeric" value="' + esc(Math.max(Number(st.numbering.startYear) === NOW_YEAR ? Number(st.numbering.start) || 1 : 1, 1)) + '">') + '</div>' +
+    field('Démarrer à', '<input data-s="numbering.start" type="text" inputmode="numeric" value="' + esc(Math.max(Number(st.numbering.startYear) === Y ? Number(st.numbering.start) || 1 : 1, 1)) + '">') + '</div>' +
     '<p class="hint">Tu as déjà émis des factures cette année avec un autre outil ? Indique le numéro suivant dans « Démarrer à » (au minimum ' + maxSeq + '). Change le préfixe seulement en début d’année.</p></div>' +
 
     '<div class="card"><div class="card-h"><span class="step">6</span><div><h2>Paiement par défaut</h2><p>Pré-rempli sur chaque nouvelle facture</p></div></div><div class="grid">' +
@@ -1692,12 +1989,18 @@ function renderSettings(mode) {
     '<div class="grid" style="gap:8px"><label class="btn small">' + ic('up') + 'Remplacer le logo<input type="file" accept="image/png,image/jpeg,image/webp" id="logo-file" class="sr"></label>' +
     (S.logoDoc ? '<button type="button" class="btn small ghost" data-act="logo-reset">Revenir au logo FAN’APA</button>' : '') + '</div></div></div>' +
 
-    '<div class="card"><div class="card-h"><div><h2>Sauvegarde</h2><p>' + (STANDALONE ? 'Tes données sont enregistrées dans ce navigateur : exporte une sauvegarde régulièrement, tes factures sont à conserver 10 ans.' : 'Tes factures sont à conserver 10 ans') + '</p></div></div>' +
+    installCardHTML() +
+    '<div class="card" id="backup-card"><div class="card-h"><div><h2>Sauvegarde</h2><p>' + (STANDALONE ? 'Tes données sont enregistrées sur cet appareil uniquement : exporte une sauvegarde régulièrement, tes factures sont à conserver 10 ans.' : 'Tes factures sont à conserver 10 ans') + '</p></div></div>' +
+    (STANDALONE ? '<p class="persist"><span class="dot ' + (bk && !bkSince ? 'ok' : 'warn') + '">' + (bk && !bkSince ? '✓' : '!') + '</span><span>' + esc(backupWhen()) +
+      (bkSince ? ' · ' + bkSince + ' facture' + (bkSince > 1 ? 's' : '') + (bk ? ' depuis' : '') + ' à mettre à l’abri' : '') + '.</span></p><p class="persist" id="persist-state"></p>' : '') +
     '<div class="btn-row"><button type="button" class="btn small" data-act="backup">' + ic('dl') + 'Exporter une sauvegarde (JSON)</button>' +
-    '<label class="btn small">' + ic('up') + 'Importer une sauvegarde<input type="file" accept="application/json,.json" id="backup-file" class="sr"></label></div></div>' +
+    '<label class="btn small">' + ic('up') + 'Importer une sauvegarde<input type="file" accept="application/json,.json" id="backup-file" class="sr"></label></div>' +
+    (STANDALONE && isIOS ? '<p class="hint">Sur iPhone : touche « Exporter », puis <b>Enregistrer dans Fichiers</b> et choisis iCloud Drive. Pour restaurer, « Importer une sauvegarde » puis choisis le fichier dans Fichiers.</p>' : '') +
+    '<p class="hint">La sauvegarde contient tes factures, tes clients, Ma structure et le logo. L’import n’écrase jamais une facture déjà présente.</p></div>' +
     '</div>' +
     '<div class="savebar"><span id="save-state">' + (S.settingsDirty ? 'Modifications non enregistrées' : 'À jour') + '</span><button type="button" class="btn primary" data-act="settings-save" id="btn-save"' + (S.settingsDirty ? '' : ' disabled') + '>' + ic('check') + 'Enregistrer</button></div>';
   updateSettingsHints();
+  renderPersistState();
 }
 function updateSettingsHints() {
   const st = S.editSettings; if (!st) return;
@@ -1709,7 +2012,7 @@ function updateSettingsHints() {
   const bar = $('#btn-save'); if (bar) bar.disabled = !S.settingsDirty;
   const ss = $('#save-state'); if (ss) ss.textContent = S.settingsDirty ? 'Modifications non enregistrées' : 'À jour';
   const np = $('#next-prev');
-  if (np) { const nx = K.nextSeq(S.invoices, 'invoice', st.numbering, NOW_YEAR); np.innerHTML = esc(nx.number) + ' <small>prochaine facture</small>'; }
+  if (np) { const nx = K.nextSeq(S.invoices, 'invoice', st.numbering, nowYear()); np.innerHTML = esc(nx.number) + ' <small>prochaine facture</small>'; }
   const rdy = $('#readiness');
   if (rdy) rdy.innerHTML = readiness(st).map(r => '<li><span class="dot ' + (r[0] ? 'ok' : r[1]) + '">' + (r[0] ? '✓' : (r[1] === 'bad' ? '✕' : '!')) + '</span><div>' + esc(r[2]) + (r[3] && !r[0] ? '<small>' + esc(r[3]) + '</small>' : '') + '</div></li>').join('');
 }
@@ -1726,10 +2029,10 @@ async function saveSettings(btn) {
   st.bic = String(st.bic || '').replace(/\s/g, '').toUpperCase();
   st.numbering.prefix = K.cleanPrefix(st.numbering.prefix, 'FA');
   st.numbering.creditPrefix = K.cleanPrefix(st.numbering.creditPrefix, 'AV');
-  const minStart = K.nextSeq(S.invoices, 'invoice', Object.assign({}, st.numbering, { start: 1 }), NOW_YEAR).seq;
+  const minStart = K.nextSeq(S.invoices, 'invoice', Object.assign({}, st.numbering, { start: 1 }), nowYear()).seq;
   st.numbering.start = Math.max(Math.floor(num(st.numbering.start)) || 1, 1);
   if (st.numbering.start < minStart) st.numbering.start = minStart;
-  st.numbering.startYear = NOW_YEAR;
+  st.numbering.startYear = nowYear();
   st.vat.rate = num(st.vat.rate) || 20;
   st.catalog = st.catalog.filter(x => (x.label || '').trim()).map(x => ({ id: x.id || uid(), label: x.label.trim(), detail: (x.detail || '').trim(), unit: Math.round(Number(x.unit) || 0) }));
   st.updatedAt = new Date().toISOString();
@@ -1799,6 +2102,24 @@ document.addEventListener('click', e => {
     case 'confirm-validate': doValidate(a); break;
     case 'fix': closeSheet(); go(v); break;
     case 'send': closeSheet(); openSend(n); break;
+    case 'remind': closeSheet(); openSend(n, 'reminder'); break;
+    case 'share-mail': {
+      const inv = findInv(n); if (!inv) break;
+      const su = $('#m-subject'), bo = $('#m-body'), to = $('#m-to');
+      // Copie de l'adresse dans le même geste : il suffira de la coller dans « À »
+      if (to && to.value.trim() && navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(to.value.trim()).catch(() => { });
+      shareInvoice(inv, !!a.dataset.paid, su ? su.value : '', bo ? bo.value : '').then(ok => { if (ok) { const s = $('#stp-pdf'); if (s) s.classList.add('done'); toast('Facture partagée'); } });
+      break;
+    }
+    case 'mark-reminded': {
+      const c = Math.max(1, Number(a.dataset.c) || 1), t = K.todayISO();
+      setStatus(n, { remindedAt: t, reminders: c }, 'Relance notée').then(ok => { if (ok) { const s = a.closest('.stp'); if (s) { s.classList.add('done'); a.outerHTML = '<p><b>Relance notée le ' + K.fmtDate(t) + '</b></p>'; } } });
+      break;
+    }
+    case 'app-reload': reloadApp(); break;
+    case 'install': promptInstall(); break;
+    case 'install-later': LS.set(INSTALL_SNOOZE, Date.now() + 14 * 86400000); renderList(); break;
+    case 'backup-later': LS.set(BACKUP_SNOOZE, Date.now() + 3 * 86400000); renderList(); toast('D’accord, je te le rappellerai dans quelques jours.'); break;
     case 'pdf': savePdf(findInv(n), false).then(ok => { if (ok) toast('PDF enregistré'); }); break;
     case 'pdf-paid': savePdf(findInv(n), true).then(ok => { if (ok) toast('PDF acquitté enregistré'); }); break;
     case 'send-pdf': {
@@ -1854,6 +2175,8 @@ function onField(e) {
   if (t.dataset.b && d) {
     const val = t.type === 'checkbox' ? t.checked : t.value;
     setPath(d, t.dataset.b, val);
+    if (t.dataset.b === 'issueDate') d.dateAuto = false;        // date choisie à la main : on n'y touche plus
+    if (/^service\./.test(t.dataset.b)) d.serviceAuto = false;
     onDraftChanged(false);
     return;
   }
@@ -1867,7 +2190,7 @@ function onField(e) {
   }
   if (t.dataset.s && S.editSettings) {
     setPath(S.editSettings, t.dataset.s, t.type === 'checkbox' ? t.checked : t.value);
-    if (t.dataset.s === 'numbering.start') S.editSettings.numbering.startYear = NOW_YEAR;
+    if (t.dataset.s === 'numbering.start') S.editSettings.numbering.startYear = nowYear();
     settingsChanged(false);
     return;
   }
@@ -1899,9 +2222,28 @@ document.addEventListener('change', e => {
     const line = S.draft.lines.find(l => l.id === t.closest('.line').dataset.id);
     if (line) t.value = t.dataset.l === 'qty' ? K.fmtQty(line.qty) : K.centsToInput(line.unit);
   }
-  if (t.dataset.b === 'issueDate' && S.draft.service.mode === 'single' && !S.draft.service.date) { S.draft.service.date = t.value; onDraftChanged(true); }
+  // Tant que la date de prestation n'a pas été choisie, elle suit la date de la facture
+  if (t.dataset.b === 'issueDate' && S.draft.service.mode === 'single' && (S.draft.serviceAuto !== false || !S.draft.service.date) && t.value) {
+    S.draft.service.date = t.value; onDraftChanged(true);
+  }
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#scrim').hidden) closeSheet(); });
+// Retour au premier plan (appli installée restée ouverte) : mise à jour, date du jour, statuts « en retard »
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { flushDraft(); return; }
+  checkForUpdate();
+  if (freshenDraftDates()) { if (S.view === 'nouvelle' && !document.body.classList.contains('typing')) renderEditor(); renderTicket(); }
+  if (S.view === 'factures') renderList();
+});
+window.addEventListener('pagehide', flushDraft);
+window.addEventListener('beforeunload', e => { flushDraft(); if (S.settingsDirty || S.busy) { e.preventDefault(); e.returnValue = ''; } });
+// Téléphone : pendant la saisie, on masque les barres du bas (voir body.typing)
+// Seulement les champs qui ouvrent un clavier (pas les dates ni les listes, qui ouvrent une roue)
+const TYPING_SEL = 'input:not([type]), input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input[type="search"], input[type="url"], textarea';
+document.addEventListener('focusin', e => { if (coarse() && e.target && e.target.matches && e.target.matches(TYPING_SEL)) document.body.classList.add('typing'); });
+document.addEventListener('focusout', () => {
+  setTimeout(() => { const a = document.activeElement; if (!a || !a.matches || !a.matches(TYPING_SEL)) document.body.classList.remove('typing'); }, 80);
+});
 window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (h && h !== S.view) go(h, { noHash: true }); });
 window.addEventListener('resize', () => { if (S.view === 'nouvelle') renderPreview(); });
 
@@ -1910,10 +2252,12 @@ window.addEventListener('resize', () => { if (S.view === 'nouvelle') renderPrevi
    ===================================================================== */
 function start(hot) {
   hot = hot || {};
-  const saved = hot.draft || LS.get('fanapa.draft.v1');
+  const saved = hot.draft || LS.get(DRAFT_KEY);
   S.draft = saved && saved.v === 1 && Array.isArray(saved.lines) ? deepMerge(newDraft(), saved) : newDraft();
   if (!S.draft.lines.length) S.draft.lines.push(newLine());
   S.draft.lines.forEach(l => { if (!l.id) l.id = uid(); });
+  freshenDraftDates();
+  initPwa();
   const h = location.hash.slice(1);
   go(hot.view || (['factures', 'nouvelle', 'clients', 'structure'].includes(h) ? h : 'factures'), { noHash: !h });
   if (window.claude && window.claude.hot && window.claude.hot.snapshot) {

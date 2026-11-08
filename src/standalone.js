@@ -8,7 +8,11 @@
                    synchronisée entre les onglets du même navigateur ;
      - downloads : téléchargement classique, ou menu de partage natif
                    sur téléphone (le PDF arrive déjà joint dans Mail) ;
+     - share     : (version autonome uniquement) partage d'un fichier avec
+                   un objet et un message, pour l'envoi depuis un téléphone ;
      - user      : utilisateur local, tous les droits.
+   acquire() pose un vrai bail atomique (IndexedDB) : deux onglets ne peuvent
+   pas attribuer le même numéro de facture.
    Pour synchroniser plusieurs appareils, remplace uniquement ce fichier
    par un adaptateur vers un serveur (Supabase, Firebase…) qui respecte
    la même interface : le reste de l'appli n'a pas à changer.
@@ -21,6 +25,7 @@
   const DB_NAME = 'fanapa-factures';
   const STORE = 'docs';
   const LS_KEY = 'fanapa-factures.db';
+  const LEASE = '#lease:';        // baux de numérotation (le « # » n'existe dans aucun chemin de document)
   const mem = new Map();          // chemin -> document (copie en mémoire)
   const listeners = new Set();
   const META = Object.freeze({ fromCache: false, hasPendingWrites: false });
@@ -78,7 +83,33 @@
       const tx = idb.transaction(STORE, 'readwrite');
       const st = tx.objectStore(STORE);
       if (val === undefined) st.delete(path); else st.put(val, path);
+      st.delete(LEASE + path); // le document existe désormais : son bail n'a plus d'objet
       tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+      tx.onabort = () => rej(tx.error);
+    });
+  }
+  /* Bail atomique : les transactions IndexedDB en écriture sur le même magasin sont
+     exécutées l'une après l'autre, y compris entre onglets. Lire puis poser le bail
+     dans la même transaction garantit qu'un seul onglet obtient un numéro donné. */
+  function idbLease(path, holder, ttlMs) {
+    return new Promise((res, rej) => {
+      const tx = idb.transaction(STORE, 'readwrite');
+      const st = tx.objectStore(STORE);
+      const now = Date.now();
+      let out = null;
+      const rq = st.get(LEASE + path);
+      rq.onsuccess = () => {
+        const l = rq.result;
+        if (l && l.expiresAt > now && l.holder !== holder) {
+          out = { acquired: false, version: 1, holder: l.holder, expiresAt: new Date(l.expiresAt).toISOString() };
+          return;
+        }
+        const exp = now + ttlMs;
+        st.put({ holder, expiresAt: exp }, LEASE + path);
+        out = { acquired: true, version: 1, holder, expiresAt: new Date(exp).toISOString() };
+      };
+      tx.oncomplete = () => res(out);
       tx.onerror = () => rej(tx.error);
       tx.onabort = () => rej(tx.error);
     });
@@ -95,7 +126,7 @@
   const ready = (async () => {
     idb = await openIDB();
     if (idb) {
-      try { (await idbLoadAll(idb)).forEach(([k, v]) => mem.set(k, v)); }
+      try { (await idbLoadAll(idb)).forEach(([k, v]) => { if (!String(k).startsWith('#')) mem.set(k, v); }); }
       catch (e) { idb = null; }
     }
     if (!idb) {
@@ -178,7 +209,15 @@
     return {
       id: path.split('/').pop(),
       path,
-      async get() { await ready; return docSnap(path); },
+      async get() {
+        await ready;
+        // Lecture fraîche : un autre onglet a pu écrire ce document à l'instant
+        if (idb) {
+          try { const v = await idbGet(path); if (v === undefined) mem.delete(path); else mem.set(path, v); }
+          catch (e) { /* copie en mémoire */ }
+        }
+        return docSnap(path);
+      },
       async set(data) { if (!storageOk) throw err('unavailable', 'Stockage bloqué'); await persist(path, body(data)); },
       async update(data) {
         await ready;
@@ -186,7 +225,17 @@
         await persist(path, mergeDeep(mem.get(path), body(data)));
       },
       async delete() { await persist(path, undefined); },
-      async acquire(opts) { return { acquired: true, version: 1, holder: opts && opts.holder, expiresAt: new Date(Date.now() + ((opts && opts.ttlMs) || 30000)).toISOString() }; },
+      async acquire(opts) {
+        await ready;
+        const holder = String((opts && opts.holder) || 'local');
+        const ttl = Math.min(Math.max(Number(opts && opts.ttlMs) || 30000, 1000), 120000);
+        if (idb) {
+          try { return await idbLease(path, holder, ttl); }
+          catch (e) { throw err('unavailable', 'Verrou indisponible pour le moment'); }
+        }
+        // Repli localStorage (sans IndexedDB) : un seul onglet à la fois en pratique
+        return { acquired: true, version: 1, holder, expiresAt: new Date(Date.now() + ttl).toISOString() };
+      },
       onSnapshot(next, onError) { return subscribe('doc', path, next, onError); },
       collection(sub) { return colRef(path + '/' + sub); }
     };
@@ -234,6 +283,32 @@
     }
   };
 
+  /* ---------- Partage natif (téléphone) : fichier + message ----------
+     Propre à la version autonome. Sur iPhone, le menu de partage ouvre Mail ou Gmail
+     avec le PDF déjà joint, l'objet et le message déjà écrits. */
+  const isTouch = () => !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  const share = {
+    available() {
+      if (!isTouch() || typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function' || typeof File !== 'function') return false;
+      try { return navigator.canShare({ files: [new File(['%PDF-'], 'test.pdf', { type: 'application/pdf' })] }); } catch (e) { return false; }
+    },
+    async send({ filename, data, title, text }) {
+      if (!filename || data == null) throw err('bad_request', 'Fichier vide');
+      const ext = String(filename).split('.').pop().toLowerCase();
+      const type = MIME[ext] || 'application/octet-stream';
+      const file = new File([data], filename, { type });
+      const tries = [{ files: [file], title, text }, { files: [file], text }, { files: [file] }]
+        .map(o => { Object.keys(o).forEach(k => { if (o[k] == null || o[k] === '') delete o[k]; }); return o; });
+      const payload = tries.find(o => { try { return navigator.canShare(o); } catch (e) { return false; } });
+      if (!payload) throw err('unsupported', 'Partage indisponible sur cet appareil');
+      try { await navigator.share(payload); return { status: 'shared', withText: !!payload.text }; }
+      catch (e) {
+        if (e && e.name === 'AbortError') throw err('declined', 'Partage annulé');
+        throw err('unavailable', 'Partage impossible pour le moment');
+      }
+    }
+  };
+
   /* ---------- Utilisateur local ---------- */
   const user = {
     isOwner: async () => true,
@@ -249,6 +324,7 @@
     async use(name) {
       if (name === 'db') { await ready; return storageOk || idb ? db : null; }
       if (name === 'downloads') return downloads;
+      if (name === 'share') return share;
       if (name === 'user') return user;
       return null;
     }

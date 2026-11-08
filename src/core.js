@@ -279,6 +279,33 @@
     };
   }
 
+  /* ---------- Relance d'une facture impayée (vouvoiement, ton courtois) ---------- */
+  function reminderLabel(n) {
+    n = Math.max(1, Math.floor(Number(n) || 1));
+    return n === 1 ? 'Relance' : n + 'e relance';
+  }
+  function buildReminderMail(inv, settings, count) {
+    const n = Math.max(1, Math.floor(Number(count) || 1));
+    const f = mailFields(inv, settings);
+    const c = inv.client || {};
+    const due = inv.term === 'reception' ? 'payable à réception' : 'arrivée à échéance le ' + fmtDate(inv.dueDate);
+    let body = 'Bonjour {client},\n\n' +
+      (n === 1 ? 'Sauf erreur de ma part, la facture' : 'Je me permets de revenir vers vous : la facture') +
+      ' n° {numero} du {date}, d’un montant de {montant}, ' + due + ', reste à ce jour impayée.\n\n' +
+      'Pourriez-vous procéder à son règlement dès que possible ? {reglement}\n\n';
+    if (c.type === 'pro' && n >= 2) {
+      const rate = (inv.terms && inv.terms.penaltyRate) || DEFAULT_PENALTY;
+      body += 'Pour rappel, tout retard de paiement entraîne des pénalités calculées à ' + rate +
+        ' ainsi qu’une indemnité forfaitaire pour frais de recouvrement de 40 € (art. L441-10 et D441-5 du Code de commerce).\n\n';
+    }
+    body += 'Si votre règlement a été effectué entre-temps, merci de ne pas tenir compte de ce message.\n\n' +
+      'Je reste à votre disposition pour toute question.\n\nBien cordialement,\n\n{signature}';
+    return {
+      subject: fillTemplate(reminderLabel(n) + ' : facture {numero} – {structure}', f),
+      body: fillTemplate(body, f)
+    };
+  }
+
   /* =====================================================================
      PDF (jsPDF) — A4, Montserrat embarquée, PDF protégé en écriture
      ===================================================================== */
@@ -593,7 +620,7 @@
     methodLong, methodLabel, methodsText, vatMention, computeTotals, lineTotal,
     sellerName, sellerLines, clientAddressLines, serviceText, dueShort, dueSentence, proLateText, insuranceText,
     cleanPrefix, seriesKey, formatNumber, nextSeq,
-    mailFields, fillTemplate, buildMail,
+    mailFields, fillTemplate, buildMail, reminderLabel, buildReminderMail,
     buildInvoicePDF, pdfClean, csvMoney, toCSV
   };
 })(typeof window !== 'undefined' ? window : globalThis);

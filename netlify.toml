@@ -1,0 +1,14 @@
+# Mise en ligne sur Netlify depuis GitHub : chaque push republie l'appli.
+# Le build régénère app/ à partir de src/ et assets/ (Node seul, aucune dépendance npm).
+# Les en-têtes HTTP (sécurité, mise à jour du service worker) sont dans app/_headers,
+# copié depuis src/pwa/_headers : ils s'appliquent aussi en glisser-déposer (Netlify Drop).
+
+[build]
+  publish = "app"
+  command = "node build/build.mjs"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # jsPDF (tests) et Playwright ne servent pas au build : on ne les installe pas
+  NPM_FLAGS = "--omit=dev"
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1"

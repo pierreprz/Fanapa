@@ -1,10 +1,11 @@
 /* Tests du cœur métier (formats, contrôles, numérotation, e-mail) et du PDF.
    Usage : npm test   → génère aussi des PDF d'exemple dans test/out/ */
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
+import { parseHeaders } from '../build/serve.mjs';
 
 const require = createRequire(import.meta.url);
 const { jsPDF } = require('jspdf');
@@ -92,9 +93,48 @@ test('e-mail pré-rempli', () => {
   assert.match(m.body, /230,00 €/);
   assert.match(m.body, /IBAN : FR76 3000/);
 });
+test('relance courtoise ; pénalités rappelées aux professionnels à partir de la 2e', () => {
+  const r1 = K.buildReminderMail(base, { mail: {} }, 1);
+  assert.equal(r1.subject, "Relance : facture FA-2026-001 – FAN'APA");
+  assert.match(r1.body, /^Bonjour Mme Jeanne Martin,/);
+  assert.match(r1.body, /Sauf erreur de ma part, la facture n° FA-2026-001 du 08\/11\/2026, d’un montant de 230,00 €, payable à réception, reste à ce jour impayée\./);
+  assert.match(r1.body, /IBAN : FR76 3000/);
+  assert.doesNotMatch(r1.body, /40 €/);
+  const pro = Object.assign({}, base, { term: '30', dueDate: '2026-12-08', client: { type: 'pro', name: 'Association Sport Santé', contact: 'M. Paul Durand' } });
+  const r2 = K.buildReminderMail(pro, { mail: {} }, 2);
+  assert.equal(r2.subject, "2e relance : facture FA-2026-001 – FAN'APA");
+  assert.match(r2.body, /^Bonjour M\. Paul Durand,/);
+  assert.match(r2.body, /arrivée à échéance le 08\/12\/2026/);
+  assert.match(r2.body, /indemnité forfaitaire pour frais de recouvrement de 40 €/);
+  assert.equal(K.reminderLabel(3), '3e relance');
+});
 test('CSV sans formule involontaire', () => {
   const csv = K.toCSV([['=SOMME(A1)', '-240,00', 'a;b']]);
   assert.ok(csv.includes("'=SOMME(A1)") && csv.includes(';-240,00;') && csv.includes('"a;b"'));
+});
+
+console.log('Mise en ligne (Netlify, appli installable)');
+test('en-têtes : politique de sécurité et service worker toujours revérifié', () => {
+  const rules = parseHeaders(readFileSync(join(ROOT, 'src', 'pwa', '_headers'), 'utf8'));
+  const all = rules.find(r => r.path === '/*').headers;
+  assert.match(all['Content-Security-Policy'], /default-src 'self'/);
+  assert.match(all['Content-Security-Policy'], /connect-src 'self'/);
+  assert.match(all['Content-Security-Policy'], /frame-ancestors 'none'/);
+  assert.equal(all['X-Content-Type-Options'], 'nosniff');
+  assert.equal(rules.find(r => r.path === '/sw.js').headers['Cache-Control'], 'no-cache');
+});
+test('manifeste : appli autonome, icônes présentes, raccourci « Nouvelle facture »', () => {
+  const man = JSON.parse(readFileSync(join(ROOT, 'src', 'pwa', 'manifest.webmanifest'), 'utf8'));
+  assert.equal(man.start_url, './');
+  assert.equal(man.display, 'standalone');
+  assert.ok(man.icons.some(i => i.purpose === 'maskable'));
+  man.icons.forEach(i => assert.ok(existsSync(join(ROOT, 'assets', i.src)), i.src));
+  assert.equal(man.shortcuts[0].url, './#nouvelle');
+});
+test('netlify.toml publie le dossier app/', () => {
+  const toml = readFileSync(join(ROOT, 'netlify.toml'), 'utf8');
+  assert.match(toml, /^\s*publish\s*=\s*"app"/m);
+  assert.match(toml, /^\s*command\s*=\s*"node build\/build\.mjs"/m);
 });
 
 console.log('PDF');

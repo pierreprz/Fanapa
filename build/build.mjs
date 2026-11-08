@@ -25,6 +25,8 @@ const GOOGLE_FONTS = [
   '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
   '<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600&family=Montserrat:wght@500;600;700;800&display=swap" rel="stylesheet">'
 ].join('\n');
+// Le service worker (sw.js) est enregistré par l'appli elle-même (voir « Version installable »
+// dans src/app.html), qui annonce aussi les mises à jour.
 const PWA_HEAD = [
   '<link rel="manifest" href="manifest.webmanifest">',
   '<meta name="theme-color" content="#0B3854">',
@@ -33,8 +35,7 @@ const PWA_HEAD = [
   '<meta name="apple-mobile-web-app-capable" content="yes">',
   '<meta name="mobile-web-app-capable" content="yes">',
   '<meta name="apple-mobile-web-app-title" content="FAN\'APA">',
-  '<meta name="apple-mobile-web-app-status-bar-style" content="default">',
-  '<script>if (\'serviceWorker\' in navigator && /^https?:$/.test(location.protocol)) { window.addEventListener(\'load\', function () { navigator.serviceWorker.register(\'sw.js\').catch(function () {}); }); }</script>'
+  '<meta name="apple-mobile-web-app-status-bar-style" content="default">'
 ].join('\n');
 
 function render({ fonts, head, adapterTag, jspdfUrls }) {
@@ -90,6 +91,9 @@ for (const f of ['OFL-Montserrat.txt', 'OFL-Lexend.txt']) copyFileSync(A('fonts'
 const icons = readdirSync(A('icons')).filter(f => f.endsWith('.png')).sort();
 for (const f of icons) copyFileSync(A('icons', f), join(APP, 'icons', f));
 copyFileSync(join(ROOT, 'src', 'pwa', 'manifest.webmanifest'), join(APP, 'manifest.webmanifest'));
+// En-têtes HTTP (sécurité, mise à jour du service worker) : lus par Netlify et par build/serve.mjs
+copyFileSync(join(ROOT, 'src', 'pwa', '_headers'), join(APP, '_headers'));
+JSON.parse(readFileSync(join(APP, 'manifest.webmanifest'), 'utf8')); // manifeste valide
 
 const standalone = render({
   fonts: '<link rel="stylesheet" href="fonts/fonts.css">',
@@ -100,7 +104,8 @@ const standalone = render({
 writeFileSync(join(APP, 'index.html'), standalone);
 
 const version = createHash('sha256').update(standalone).digest('hex').slice(0, 10);
-const assets = ['./', './index.html', './manifest.webmanifest', './vendor/jspdf.umd.min.js', './fonts/fonts.css']
+// « ./ » est l'appli elle-même : le service worker la sert aussi pour « ./index.html »
+const assets = ['./', './manifest.webmanifest', './vendor/jspdf.umd.min.js', './fonts/fonts.css']
   .concat(fontFiles.map(f => './fonts/' + f), icons.map(f => './icons/' + f));
 const sw = readFileSync(join(ROOT, 'src', 'pwa', 'sw.js'), 'utf8')
   .replace('/*__VERSION__*/', version)

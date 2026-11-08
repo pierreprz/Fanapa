@@ -5,45 +5,90 @@ Appli de facturation pour FAN'APA, micro-entreprise d'activité physique adapté
 - factures conformes (toutes les mentions obligatoires sont vérifiées avant validation) ;
 - numérotation automatique et continue : FA-2026-001, puis 002, etc. ;
 - PDF avec le logo, protégé contre la modification ;
-- e-mail au client pré-rempli (Gmail, Mail, Outlook) ;
-- suivi des paiements, avoirs, PDF « facture acquittée » pour les mutuelles ;
-- livre des recettes et registre des factures en CSV, encaissements par trimestre pour l'Urssaf.
+- envoi au client : sur iPhone, un seul geste ouvre Mail ou Gmail avec le PDF joint et le message
+  déjà écrit ; sur ordinateur, e-mail pré-rempli (Gmail, Mail, Outlook) ;
+- suivi des paiements, **relances** des factures en retard, avoirs, PDF « facture acquittée » pour
+  les mutuelles ;
+- livre des recettes et registre des factures en CSV, encaissements par trimestre pour l'Urssaf ;
+- appli installable sur le téléphone, qui fonctionne **sans réseau** et se met à jour toute seule ;
+- rappel de **sauvegarde** tant que des factures ne sont que sur l'appareil.
 
-## Utiliser tout de suite
+## Mettre l'appli en ligne (Netlify)
 
-1. Ouvre `app/index.html` dans Chrome, Safari ou Firefox : l'appli fonctionne directement.
-2. Pour l'installer sur un téléphone comme une vraie appli, mets le dossier `app/` en ligne
-   (par exemple en le glissant sur Netlify Drop), ouvre l'adresse sur le téléphone, puis
-   « Ajouter à l'écran d'accueil ». Elle marche ensuite aussi hors connexion.
+Le dossier `app/` est un site statique complet (aucun serveur nécessaire). Deux façons de le
+publier, au choix :
 
-> **Important :** cette version enregistre les données **dans le navigateur de l'appareil**.
-> Exporte une sauvegarde régulièrement (Ma structure → Sauvegarde) : les factures sont à
-> conserver 10 ans. Pour retrouver les factures sur plusieurs appareils, il faut un serveur
-> (voir « Idées » plus bas).
+**A. Depuis GitHub (recommandé : chaque modification se publie toute seule)**
+
+1. Sur [app.netlify.com](https://app.netlify.com), « Add new project » → « Import an existing project » → GitHub.
+2. Choisis le dépôt `fanapa` et la branche à publier.
+3. Ne touche à rien d'autre : `netlify.toml` indique déjà le dossier `app/` et la commande de build.
+4. « Deploy ». L'adresse ressemble à `https://fanapa-factures.netlify.app` (modifiable dans
+   « Site configuration → Change site name »).
+
+**B. Par glisser-déposer (Netlify Drop, depuis un ordinateur)**
+
+1. Ouvre [app.netlify.com/drop](https://app.netlify.com/drop) en étant connecté·e.
+2. Glisse le dossier `app/` (ou une archive .zip de ce dossier) dans la page.
+3. Pour une mise à jour : dans le site, onglet « Deploys », glisse de nouveau le dossier.
+
+Les en-têtes de sécurité et de mise à jour (`app/_headers`) s'appliquent dans les deux cas.
+
+## Installer l'appli sur iPhone
+
+1. Ouvre l'adresse du site dans **Safari**.
+2. Touche le bouton **Partager** (carré avec une flèche vers le haut ; sur iOS 26, il est dans le
+   menu **⋯** en bas à droite).
+3. Choisis **Sur l'écran d'accueil** (fais défiler si besoin), laisse « Ouvrir comme app web »
+   activé, puis touche **Ajouter**.
+4. Ouvre ensuite toujours l'appli depuis son icône : elle démarre instantanément, même sans réseau.
+
+L'appli affiche elle-même ces étapes tant qu'elle n'est pas installée (et un bouton « Installer »
+sur Android et sur ordinateur avec Chrome ou Edge).
+
+> **Important — tes données restent sur ton téléphone.**
+> - Sur iPhone, l'appli installée garde ses données à part de Safari : installe-la **avant** de
+>   commencer. Si tu as déjà saisi des factures dans Safari, exporte une sauvegarde depuis Safari
+>   (Ma structure → Sauvegarde) puis importe-la dans l'appli installée.
+> - **Supprimer l'icône de l'appli efface aussi ses données.**
+> - Exporte une sauvegarde régulièrement (l'appli te le rappelle) et range-la dans Fichiers →
+>   iCloud Drive : les factures sont à conserver 10 ans. Pour retrouver les factures sur plusieurs
+>   appareils, il faudra un serveur (voir « Idées » plus bas).
+
+## Utiliser sans rien installer
+
+Ouvre `app/index.html` dans Chrome, Safari ou Firefox : l'appli fonctionne directement (sans
+l'installation sur l'écran d'accueil ni le mode hors connexion, qui demandent une adresse https).
 
 ## Développer
 
 ```bash
 npm install                  # jsPDF (tests) et Playwright
 npm run build                # régénère app/ et dist/artifact/
-npm test                     # tests du cœur métier + PDF d'exemple dans test/out/
+npm test                     # tests du cœur métier, en-têtes, manifeste + PDF d'exemple dans test/out/
 npx playwright install chromium
-npm run test:e2e             # parcours complet dans un vrai navigateur
-npm start                    # http://localhost:5173
+npm run test:e2e             # parcours complet dans un vrai navigateur (CHROME_PATH=… pour un Chrome existant)
+npm start                    # http://localhost:5173, avec les mêmes en-têtes que Netlify
 ```
 
 Ne modifie jamais `app/index.html` à la main : change `src/`, puis `npm run build`.
+
+Le parcours complet vérifie notamment : validation et numérotation, PDF, envoi, ouverture hors
+connexion, détection d'une nouvelle version, rappel de sauvegarde, sauvegarde puis import sur un
+autre navigateur (logo compris), relance d'une facture échue, verrou de numérotation entre deux
+onglets, encart d'installation iPhone et partage du PDF avec le message.
 
 ## Organisation
 
 ```
 src/app.html        interface (HTML/CSS/JS sans framework) avec ses marqueurs de build
-src/core.js         cœur métier : formats, contrôles, numérotation, mentions, PDF, CSV
-src/standalone.js   adaptateur hors claude.ai : stockage IndexedDB, téléchargement / partage
-src/pwa/            manifest et service worker de la version installable
+src/core.js         cœur métier : formats, contrôles, numérotation, mentions, relances, PDF, CSV
+src/standalone.js   adaptateur hors claude.ai : stockage IndexedDB, verrou, téléchargement / partage
+src/pwa/            manifeste, service worker et en-têtes HTTP (_headers) de la version installable
 assets/             logo, polices (Montserrat, Lexend), jsPDF, icônes
 build/build.mjs     assemble app/ (version autonome) et dist/artifact/ (version claude.ai)
-build/serve.mjs     petit serveur local
+build/serve.mjs     petit serveur local (applique app/_headers comme Netlify)
+netlify.toml        mise en ligne depuis GitHub : publie app/ après le build
 test/               tests unitaires (npm test) et parcours complet (npm run test:e2e)
 app/                version prête à l'emploi (générée)
 ```
@@ -52,18 +97,24 @@ app/                version prête à l'emploi (générée)
 
 L'interface n'accède aux données qu'à travers `window.claude.use('db' | 'downloads' | 'user')`.
 Dans claude.ai, c'est la plateforme qui fournit ces fonctions ; ailleurs, `src/standalone.js`
-les fournit avec le stockage du navigateur. Pour synchroniser plusieurs appareils, il suffit
-d'écrire un autre adaptateur (Supabase, Firebase…) avec la même interface : `doc()` /
-`collection()`, `get`, `set`, `update`, `delete`, `onSnapshot`, `acquire`.
+les fournit avec le stockage du navigateur (plus `share` pour le partage sur téléphone). Pour
+synchroniser plusieurs appareils, il suffit d'écrire un autre adaptateur (Supabase, Firebase…)
+avec la même interface : `doc()` / `collection()`, `get`, `set`, `update`, `delete`,
+`onSnapshot`, `acquire`.
 
 Données : `config/settings`, `config/logo`, `clients/<id>`, `invoices/<numéro>`.
+
+Version installable : le service worker sert l'appli depuis le cache (ouverture immédiate, même
+hors connexion). Chaque build change sa version ; le navigateur télécharge la nouvelle en
+arrière-plan et l'appli affiche « Nouvelle version prête · Mettre à jour ».
 
 ## Règles à ne jamais casser
 
 - **Numérotation** chronologique et continue, sans trou ni doublon, une série par an.
   Le numéro n'est attribué qu'à la validation.
 - **Une facture validée ne se modifie plus** et ne se supprime pas : on l'annule par un avoir
-  (série AV), puis on la duplique pour la refaire.
+  (série AV), puis on la duplique pour la refaire. Seul son suivi évolue (envoi, relances,
+  paiement, annulation).
 - **Chaque facture garde une copie** de tout ce qu'elle affiche (émetteur, client, TVA,
   conditions) : changer « Ma structure » ne modifie jamais une facture passée.
 - **Mentions vérifiées avant validation :** nom et prénom avec « EI », adresse et SIRET,
@@ -81,12 +132,11 @@ Factur-X / UBL ou une connexion à une plateforme agréée.
 
 ## Idées à demander à Claude Code
 
-- « Mets le dossier app/ en ligne sur Netlify et explique-moi comment l'installer sur mon iPhone. »
 - « Ajoute une synchronisation Supabase pour retrouver mes factures sur tous mes appareils,
   en remplaçant uniquement src/standalone.js. »
-- « Empaquette l'appli avec Capacitor pour en faire une appli iOS et Android. »
 - « Ajoute les devis, transformables en facture en un clic. »
 - « Prépare un export Factur-X pour la facture électronique de 2027. »
+- « Empaquette l'appli avec Capacitor pour en faire une appli iOS et Android. »
 
 ## Licences
 

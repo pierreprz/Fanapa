@@ -1,17 +1,24 @@
 {
+  "id": "./",
   "name": "Factures FAN'APA",
   "short_name": "FAN'APA",
   "description": "Facturation FAN'APA – Activité Physique Adaptée & Autonomie : factures conformes, numérotation continue, PDF verrouillé, envoi par e-mail.",
   "lang": "fr",
-  "start_url": "./index.html",
+  "dir": "ltr",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#F4F8F7",
   "theme_color": "#0B3854",
+  "categories": ["business", "finance", "productivity"],
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Nouvelle facture", "short_name": "Nouvelle", "url": "./#nouvelle", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Mes factures", "short_name": "Factures", "url": "./#factures", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
   ]
 }
