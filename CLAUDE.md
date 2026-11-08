@@ -37,7 +37,15 @@ tutoiement ; tout ce que voit le client final (PDF, e-mails, relances) est au vo
   (l'identifiant du document est le numéro de facture).
 - Préférences locales (localStorage, par appareil) : `fanapa.draft.v1` (brouillon),
   `fanapa.backup.v1` (date de la dernière sauvegarde exportée), `fanapa.backup.snooze`,
-  `fanapa.install.snooze`.
+  `fanapa.install.snooze`, `fanapa.transfer.snooze`.
+- « Ma structure » s'enregistre toute seule (jamais de saisie perdue à la fermeture) :
+  `scheduleSettingsSave()` 0,6 s après chaque saisie, `saveSettingsNow()` en quittant l'écran,
+  au passage en arrière-plan et à la fermeture ; une écriture à la fois (`S.settingsSaving`).
+  `S.editSettings` est la copie de travail affichée ; la version écrite passe par
+  `normalizeSettings()` (SIRET, IBAN, préfixes, prestations vides retirées). Quand `onSnapshot`
+  renvoie notre propre écriture (`updatedAt === S.settingsWriteId`), la copie de travail est
+  conservée : sinon une ligne de prestation ajoutée puis tapée après l'enregistrement serait
+  perdue. Le bouton « Enregistrer » force l'enregistrement (utile après une erreur).
 - PDF : jsPDF 4.2.1, Montserrat embarquée en base64, PDF chiffré (impression et copie
   autorisées, modification interdite). L'aperçu HTML (`paperHTML`) reproduit le PDF
   (`buildInvoicePDF`) : toute évolution de mise en page se fait dans les deux. Les PDF sont
@@ -90,7 +98,8 @@ tutoiement ; tout ce que voit le client final (PDF, e-mails, relances) est au vo
   masquée pendant la saisie au clavier (`body.typing`). Bureau (≥ 960 px) : barre latérale,
   formulaire à gauche, aperçu A4 à droite.
 - Encarts (`.notice`) : installation (`installNoticeHTML`), rappel de sauvegarde
-  (`backupNoticeHTML`), en tête de la liste des factures.
+  (`backupNoticeHTML`), appli installée encore vide sur iPhone (`transferNoticeHTML` : récupérer
+  par une sauvegarde ce qui a été saisi dans Safari), en tête de la liste des factures.
 
 ## À savoir
 - iPhone : l'appli installée garde ses données à part de Safari, et supprimer son icône efface

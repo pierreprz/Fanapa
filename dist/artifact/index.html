@@ -1287,6 +1287,7 @@ const S = {
   settingsRaw: null, logoDoc: null, invoices: [], clients: [],
   got: { settings: false, invoices: false, clients: false, logo: false },
   view: 'factures', draft: null, editSettings: null, settingsDirty: false,
+  settingsSaving: null, settingsAgain: false, saveError: false, settingsWriteId: '',
   filter: 'all', q: '', year: NOW_YEAR, cq: '', busy: false
 };
 const settings = () => deepMerge(DEFAULT_SETTINGS, S.settingsRaw || {});
@@ -1459,9 +1460,10 @@ function renderUpdate() {
   b.hidden = !PWA.updateReady;
   b.innerHTML = PWA.updateReady ? ic('up') + '<div><b>Nouvelle version de l’appli prête.</b> Recharge pour en profiter : tes factures ne bougent pas.</div><button type="button" class="btn small primary" data-act="app-reload">Mettre à jour</button>' : '';
 }
-function reloadApp() {
+async function reloadApp() {
   if (S.busy) { toast('Patiente un instant : une opération est en cours.'); return; }
-  if (S.settingsDirty) { toast('Enregistre d’abord Ma structure, puis mets à jour.'); go('structure'); return; }
+  if (S.settingsDirty || S.settingsSaving) await saveSettingsNow();
+  if (S.settingsDirty) { toast('Ma structure n’a pas pu être enregistrée : réessaie avant de mettre à jour.'); go('structure'); return; }
   flushDraft();
   location.reload();
 }
@@ -1508,7 +1510,22 @@ function installNoticeHTML() {
   const title = kind === 'ios' ? 'Installe l’appli sur ton iPhone' : 'Installe l’appli sur ton appareil';
   return '<div class="notice info" id="install-notice">' + ic('up') + '<div><b>' + title + '</b><p>Une icône sur l’écran d’accueil, une ouverture instantanée, et l’appli marche même sans réseau.</p>' + installBody(kind) + '</div>' +
     '<div class="btn-row">' + (kind === 'prompt' ? '<button type="button" class="btn small primary" data-act="install">' + ic('dl') + 'Installer</button>' : '') +
+    (kind === 'ios' && hasLocalData() ? '<button type="button" class="btn small primary" data-act="backup">' + ic('dl') + 'Exporter une sauvegarde</button>' : '') +
     '<button type="button" class="btn small ghost" data-act="install-later">Plus tard</button></div></div>';
+}
+/* iPhone : l'appli installée démarre sans ce qui a été saisi dans Safari (iOS sépare leurs données).
+   Quand elle est encore vide, on propose de récupérer ces données par une sauvegarde. */
+const TRANSFER_SNOOZE = 'fanapa.transfer.snooze';
+function transferNoticeHTML() {
+  if (!STANDALONE || !isIOS || !isInstalled()) return '';
+  if (!S.got.settings || !S.got.invoices || !S.got.clients || hasLocalData()) return '';
+  if (Date.now() < (Number(LS.get(TRANSFER_SNOOZE)) || 0)) return '';
+  return '<div class="notice info" id="transfer-notice">' + ic('up') + '<div><b>Tu avais déjà commencé dans Safari ?</b>' +
+    '<p>Sur iPhone, l’appli installée a ses propres données : ce que tu as saisi dans Safari n’apparaît pas ici. Pour le récupérer :</p>' +
+    '<ol><li>Ouvre la même adresse dans <b>Safari</b>, puis Ma structure → Sauvegarde → <b>Exporter</b>, et choisis « Enregistrer dans Fichiers ».</li>' +
+    '<li>Reviens ici et touche <b>Importer une sauvegarde</b> : tout revient, numérotation comprise.</li></ol></div>' +
+    '<div class="btn-row"><label class="btn small primary">' + ic('up') + 'Importer une sauvegarde<input type="file" accept="application/json,.json" data-import="backup" class="sr"></label>' +
+    '<button type="button" class="btn small ghost" data-act="transfer-later">Je commence ici</button></div></div>';
 }
 function installCardHTML() {
   if (!STANDALONE || !httpOk) return '';
@@ -1802,7 +1819,10 @@ async function connect() {
   try {
     db.doc('config/settings').onSnapshot(snap => {
       S.settingsRaw = snap.exists ? snap.data() : null; mark('settings', snap.metadata);
-      if (!S.settingsDirty) S.editSettings = null;
+      // Notre propre enregistrement automatique : on garde la copie de travail (lignes vides
+      // de prestations en cours de saisie comprises) ; un changement venu d'ailleurs la remplace.
+      const own = !!(S.settingsRaw && S.settingsWriteId && S.settingsRaw.updatedAt === S.settingsWriteId);
+      if (!S.settingsDirty && !own) S.editSettings = null;
       refreshPristineDraft();
       renderAll();
     }, onErr);
@@ -1868,9 +1888,10 @@ function renderAll() {
 
 function go(view, opts) {
   if (!['factures', 'nouvelle', 'clients', 'structure'].includes(view)) view = 'factures';
-  if (S.view === 'structure' && view !== 'structure' && S.settingsDirty) {
-    toast('Modifications de Ma structure non enregistrées : pense à enregistrer.');
-  }
+  // Quitter Ma structure enregistre aussitôt ce qui a été saisi
+  if (S.view === 'structure' && view !== 'structure' && S.settingsDirty) saveSettingsNow();
+  // Revenir sur Ma structure repart de la version enregistrée (valeurs nettoyées : SIRET, IBAN…)
+  if (view === 'structure' && S.view !== 'structure' && !S.settingsDirty && !S.settingsSaving && !S.saveError) S.editSettings = null;
   S.view = view;
   ['factures', 'nouvelle', 'clients', 'structure'].forEach(v => document.body.classList.toggle('v-' + v, v === view));
   $$('.view').forEach(v => v.classList.toggle('on', v.id === 'view-' + view));
@@ -2230,7 +2251,7 @@ function renderList() {
   if (S.db && !S.got.invoices) { body.innerHTML = '<div class="card empty">Chargement de tes factures…</div>'; return; }
   const ready = !!(T(st.firstName) && T(st.lastName) && K.validSiret(st.siret) && T(st.address.line1));
   if (!S.invoices.length) {
-    body.innerHTML = installNoticeHTML() + '<div class="card welcome"><img src="' + esc(logoSrc()) + '" alt="FAN’APA"><h2>Bienvenue dans tes factures</h2>' +
+    body.innerHTML = transferNoticeHTML() + installNoticeHTML() + '<div class="card welcome"><img src="' + esc(logoSrc()) + '" alt="FAN’APA"><h2>Bienvenue dans tes factures</h2>' +
       '<ol><li class="' + (ready ? 'done' : '') + '"><div><b>Renseigne ta structure</b><span>Nom, adresse, SIRET, IBAN, assurance : 2 minutes, une seule fois.</span></div><button type="button" class="btn small" data-go="structure">' + (ready ? 'Revoir' : 'Commencer') + '</button></li>' +
       '<li><div><b>Crée ta première facture</b><span>Elle portera le numéro ' + esc(nextInfo('invoice', K.todayISO()).number) + ', puis la numérotation suit toute seule.</span></div><button type="button" class="btn small primary" data-go="nouvelle">Créer</button></li>' +
       '<li><div><b>Envoie-la en PDF</b><span>Message pré-rempli pour ton client, PDF verrouillé contre la modification.</span></div></li></ol></div>';
@@ -2455,7 +2476,8 @@ async function doImport(btn) {
     const box = $('#imp-settings');
     if (p.settings && box && box.checked) {
       await write(() => S.db.doc('config/settings').set(p.settings));
-      S.settingsRaw = p.settings; S.editSettings = null; S.settingsDirty = false;
+      clearTimeout(settingsTimer); // un enregistrement automatique en attente n'écrase pas l'import
+      S.settingsRaw = p.settings; S.editSettings = null; S.settingsDirty = false; S.saveError = false;
       if (p.logo) { await write(() => S.db.doc('config/logo').set(p.logo)); S.logoDoc = p.logo; }
     }
     // Les factures importées sont, par définition, déjà dans une sauvegarde
@@ -2630,7 +2652,7 @@ function renderSettings(mode) {
     (STANDALONE && isIOS ? '<p class="hint">Sur iPhone : touche « Exporter », puis <b>Enregistrer dans Fichiers</b> et choisis iCloud Drive. Pour restaurer, « Importer une sauvegarde » puis choisis le fichier dans Fichiers.</p>' : '') +
     '<p class="hint">La sauvegarde contient tes factures, tes clients, Ma structure et le logo. L’import n’écrase jamais une facture déjà présente.</p></div>' +
     '</div>' +
-    '<div class="savebar"><span id="save-state">' + (S.settingsDirty ? 'Modifications non enregistrées' : 'À jour') + '</span><button type="button" class="btn primary" data-act="settings-save" id="btn-save"' + (S.settingsDirty ? '' : ' disabled') + '>' + ic('check') + 'Enregistrer</button></div>';
+    '<div class="savebar"><span id="save-state"></span><button type="button" class="btn primary" data-act="settings-save" id="btn-save" disabled>' + ic('check') + 'Enregistrer</button></div>';
   updateSettingsHints();
   renderPersistState();
 }
@@ -2641,8 +2663,7 @@ function updateSettingsHints() {
   h('siret', sir ? (K.validSiret(sir) ? 'ok' : 'bad') : '', sir ? (K.validSiret(sir) ? 'SIRET valide · ' + K.fmtSiret(sir) : 'SIRET incorrect (' + sir.length + ' chiffres)') : 'Sur ton avis de situation Insee.');
   const ibInput = document.querySelector('[data-s="iban"]');
   if (ibInput) ibInput.classList.toggle('invalid', !!st.iban && !K.validIban(st.iban));
-  const bar = $('#btn-save'); if (bar) bar.disabled = !S.settingsDirty;
-  const ss = $('#save-state'); if (ss) ss.textContent = S.settingsDirty ? 'Modifications non enregistrées' : 'À jour';
+  renderSaveState();
   const np = $('#next-prev');
   if (np) { const nx = K.nextSeq(S.invoices, 'invoice', st.numbering, nowYear()); np.innerHTML = esc(nx.number) + ' <small>prochaine facture</small>'; }
   const rdy = $('#readiness');
@@ -2652,10 +2673,11 @@ function settingsChanged(rerender) {
   S.settingsDirty = true;
   if (rerender) { const keep = window.scrollY; renderSettings('redraw'); window.scrollTo({ top: keep }); }
   else updateSettingsHints();
+  scheduleSettingsSave();
 }
-async function saveSettings(btn) {
-  if (!canWrite()) { toast(S.readOnly ? 'Accès en lecture seule.' : 'Stockage indisponible.'); return; }
-  const st = clone(S.editSettings);
+// Version enregistrée de Ma structure : la copie de travail (S.editSettings) reste telle quelle
+function normalizeSettings(src) {
+  const st = clone(src);
   st.siret = K.digits(st.siret);
   st.iban = String(st.iban || '').replace(/\s/g, '').toUpperCase();
   st.bic = String(st.bic || '').replace(/\s/g, '').toUpperCase();
@@ -2668,15 +2690,62 @@ async function saveSettings(btn) {
   st.vat.rate = num(st.vat.rate) || 20;
   st.catalog = st.catalog.filter(x => (x.label || '').trim()).map(x => ({ id: x.id || uid(), label: x.label.trim(), detail: (x.detail || '').trim(), unit: Math.round(Number(x.unit) || 0) }));
   st.updatedAt = new Date().toISOString();
-  if (btn) btn.disabled = true;
-  try {
-    await write(() => S.db.doc('config/settings').set(st));
-    S.settingsRaw = st; S.settingsDirty = false; S.editSettings = null;
-    toast('Ma structure est enregistrée');
-    renderSettings('reset');
+  return st;
+}
+/* Enregistrement automatique : peu après la saisie, en quittant l'écran ou l'appli.
+   Une écriture à la fois ; ce qui est tapé pendant une écriture part à la suivante. */
+let settingsTimer = null;
+function scheduleSettingsSave() {
+  clearTimeout(settingsTimer);
+  settingsTimer = setTimeout(() => { saveSettingsNow(); }, 600);
+}
+function saveSettingsNow() {
+  clearTimeout(settingsTimer);
+  if (S.settingsSaving) { S.settingsAgain = true; return S.settingsSaving; }
+  if (!S.editSettings || !S.settingsDirty) return Promise.resolve(true);
+  if (!canWrite()) { S.saveError = true; renderSaveState(); return Promise.resolve(false); }
+  const st = normalizeSettings(S.editSettings);
+  S.settingsDirty = false;          // une saisie pendant l'écriture le repassera à true
+  S.saveError = false;
+  S.settingsWriteId = st.updatedAt; // pour reconnaître notre propre écriture dans onSnapshot
+  renderSaveState(true);
+  S.settingsSaving = write(() => S.db.doc('config/settings').set(st)).then(() => {
+    S.settingsRaw = st;
     refreshPristineDraft();
-    if (S.draft) { renderTicket(); }
-  } catch (e) { toast(dbMsg(e)); if (btn) btn.disabled = false; }
+    if (S.draft) renderTicket();
+    return true;
+  }).catch(e => {
+    S.settingsDirty = true; S.saveError = true;
+    toast(dbMsg(e));
+    return false;
+  }).finally(() => {
+    S.settingsSaving = null;
+    renderSaveState();
+    if (S.settingsAgain) { S.settingsAgain = false; if (S.settingsDirty) saveSettingsNow(); }
+  });
+  return S.settingsSaving;
+}
+function renderSaveState(saving) {
+  const ss = $('#save-state'), bt = $('#btn-save');
+  const busy = saving || !!S.settingsSaving;
+  if (ss) {
+    ss.textContent = S.saveError ? 'Pas encore enregistré : touche Enregistrer pour réessayer'
+      : busy ? 'Enregistrement…'
+      : S.settingsDirty ? 'Enregistrement automatique…'
+      : !S.settingsRaw ? 'Tout ce que tu saisis s’enregistre automatiquement'
+      : '✓ Enregistré automatiquement';
+    ss.className = S.saveError ? 'bad' : '';
+  }
+  if (bt) bt.disabled = !(S.settingsDirty || S.saveError) || busy;
+}
+// Bouton « Enregistrer » : enregistre tout de suite (rassurant, et utile après une erreur)
+async function saveSettings(btn) {
+  if (!canWrite()) { toast(S.readOnly ? 'Accès en lecture seule.' : 'Stockage indisponible.'); return; }
+  if (btn) btn.disabled = true;
+  S.settingsDirty = S.settingsDirty || S.saveError;
+  const ok = await saveSettingsNow();
+  if (S.settingsDirty && ok) await saveSettingsNow();
+  if (ok && !S.settingsDirty) { toast('Ma structure est enregistrée'); renderSettings('reset'); }
 }
 async function onLogoFile(file) {
   if (!file) return;
@@ -2751,6 +2820,7 @@ document.addEventListener('click', e => {
     case 'app-reload': reloadApp(); break;
     case 'install': promptInstall(); break;
     case 'install-later': LS.set(INSTALL_SNOOZE, Date.now() + 14 * 86400000); renderList(); break;
+    case 'transfer-later': LS.set(TRANSFER_SNOOZE, Date.now() + 365 * 86400000); renderList(); break;
     case 'backup-later': LS.set(BACKUP_SNOOZE, Date.now() + 3 * 86400000); renderList(); toast('D’accord, je te le rappellerai dans quelques jours.'); break;
     case 'pdf': savePdf(findInv(n), false).then(ok => { if (ok) toast('PDF enregistré'); }); break;
     case 'pdf-paid': savePdf(findInv(n), true).then(ok => { if (ok) toast('PDF acquitté enregistré'); }); break;
@@ -2849,7 +2919,7 @@ document.addEventListener('change', e => {
     return;
   }
   if (t.id === 'logo-file') { onLogoFile(t.files && t.files[0]); t.value = ''; return; }
-  if (t.id === 'backup-file') { onBackupFile(t.files && t.files[0]); t.value = ''; return; }
+  if (t.id === 'backup-file' || t.dataset.import === 'backup') { onBackupFile(t.files && t.files[0]); t.value = ''; return; }
   if (t.dataset.l === 'qty' || t.dataset.l === 'unit') {
     const line = S.draft.lines.find(l => l.id === t.closest('.line').dataset.id);
     if (line) t.value = t.dataset.l === 'qty' ? K.fmtQty(line.qty) : K.centsToInput(line.unit);
@@ -2862,14 +2932,19 @@ document.addEventListener('change', e => {
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#scrim').hidden) closeSheet(); });
 // Retour au premier plan (appli installée restée ouverte) : mise à jour, date du jour, statuts « en retard »
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') { flushDraft(); return; }
+  // Passage en arrière-plan (iPhone : l'appli peut être fermée sans prévenir) : on enregistre tout
+  if (document.visibilityState === 'hidden') { flushDraft(); if (S.settingsDirty) saveSettingsNow(); return; }
   checkForUpdate();
   if (freshenDraftDates()) { if (S.view === 'nouvelle' && !document.body.classList.contains('typing')) renderEditor(); renderTicket(); }
   if (S.view === 'factures') renderList();
 });
-window.addEventListener('pagehide', flushDraft);
+window.addEventListener('pagehide', () => { flushDraft(); if (S.settingsDirty) saveSettingsNow(); });
 // Avertissement avant de fermer : version autonome seulement (le cadre claude.ai ne l'affiche pas)
-window.addEventListener('beforeunload', e => { flushDraft(); if (STANDALONE && (S.settingsDirty || S.busy)) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', e => {
+  flushDraft();
+  if (S.settingsDirty) saveSettingsNow();
+  if (STANDALONE && (S.settingsDirty || S.settingsSaving || S.busy)) { e.preventDefault(); e.returnValue = ''; }
+});
 // Téléphone : pendant la saisie, on masque les barres du bas (voir body.typing)
 // Seulement les champs qui ouvrent un clavier (pas les dates ni les listes, qui ouvrent une roue)
 const TYPING_SEL = 'input:not([type]), input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input[type="search"], input[type="url"], textarea';

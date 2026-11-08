@@ -62,9 +62,13 @@ async function fillStructure(page) {
   };
   for (const [k, v] of Object.entries(vals)) await page.fill(`[data-s="${k}"]`, v);
   await page.fill('[data-cat="0"][data-k="unit"]', '45');
-  await page.click('[data-act="settings-save"]');
-  await page.waitForFunction(() => document.querySelector('#save-state') && document.querySelector('#save-state').textContent === 'À jour');
+  await saved(page); // plus besoin du bouton « Enregistrer » : l'enregistrement est automatique
 }
+// Ma structure : attend que l'enregistrement automatique soit fait
+const saved = page => page.waitForFunction(() => {
+  const s = document.querySelector('#save-state');
+  return s && s.textContent === '✓ Enregistré automatiquement';
+});
 async function newInvoice(page, c) {
   await blur(page);
   await page.click('.tabs [data-go="nouvelle"]');
@@ -107,7 +111,33 @@ try {
   await page.setInputFiles('#logo-file', join(ROOT, 'assets', 'logo_mark.png'));
   await page.waitForFunction(() => /Logo mis à jour/.test(document.querySelector('#toast').textContent));
   assert.match((await store('config/logo')).data, /^data:image\/jpeg;base64,/);
-  step('Ma structure enregistrée, logo personnalisé');
+  step('Ma structure enregistrée automatiquement, logo personnalisé');
+
+  // Le scénario signalé : on remplit Ma structure, on part faire une facture, on ferme, on revient
+  await page.fill('[data-s="qualification"]', 'Enseignante en APA – STAPS');
+  await page.click('.tabs [data-go="nouvelle"]');                 // quitter l'écran enregistre aussitôt
+  for (let i = 0; i < 50 && !/STAPS/.test(((await store('config/settings')) || {}).qualification || ''); i++) await page.waitForTimeout(100);
+  await page.reload();
+  await ready(page);
+  await page.click('.tabs [data-go="structure"]');
+  assert.equal(await page.inputValue('[data-s="qualification"]'), 'Enseignante en APA – STAPS');
+  assert.equal(await page.inputValue('[data-s="siret"]'), '73282932000074');
+  // Sans quitter l'écran : enregistré après une courte pause
+  await page.fill('[data-s="phone"]', '0611223344');
+  await saved(page);
+  await page.reload();
+  await ready(page);
+  await page.click('.tabs [data-go="structure"]');
+  assert.equal(await page.inputValue('[data-s="phone"]'), '0611223344');
+  // Une prestation ajoutée puis remplie après un enregistrement automatique n'est pas perdue
+  const nCat = await page.$$eval('#cat-rows [data-k="label"]', els => els.length);
+  await page.click('[data-act="cat-new"]');
+  await page.waitForTimeout(1200);                                 // l'enregistrement passe pendant que la ligne est vide
+  await page.fill(`[data-cat="${nCat}"][data-k="label"]`, 'Atelier équilibre');
+  await page.fill(`[data-cat="${nCat}"][data-k="unit"]`, '30');
+  await saved(page);
+  assert.ok((await store('config/settings')).catalog.some(x => x.label === 'Atelier équilibre' && x.unit === 3000));
+  step('Ma structure conservée sans toucher « Enregistrer » : en quittant l’écran, après une pause, à la réouverture');
 
   // Facture 1 (particulier)
   await page.click('.tabs [data-go="nouvelle"]');
@@ -323,6 +353,24 @@ try {
   assert.match(shared.text, /^Bonjour M\. Paul Durand,/);
   assert.match(shared.title, /^Facture FA-\d{4}-001/);
   step('iPhone : « Partager la facture » ouvre le partage avec le PDF joint, l’objet et le message');
+
+  /* ================= 4. iPhone, appli installée encore vide : récupérer ce qui a été saisi dans Safari ================= */
+  const ctx4 = await browser.newContext({ ...iphone, locale: 'fr-FR' });
+  await ctx4.addInitScript(() => { Object.defineProperty(navigator, 'standalone', { configurable: true, get: () => true }); });
+  const p4 = await ctx4.newPage();
+  watch(p4, '[4]');
+  await p4.goto(`${BASE}/index.html#factures`);
+  await ready(p4);
+  await p4.waitForSelector('#transfer-notice');
+  assert.equal(await p4.$('#install-notice'), null, 'appli installée : pas d’encart d’installation');
+  await p4.waitForTimeout(400);
+  await p4.screenshot({ path: join(OUT, '11-iphone-appli-vide.png') });
+  await p4.setInputFiles('#transfer-notice [data-import="backup"]', backup.file);
+  await p4.click('[data-act="import-ok"]');
+  await p4.waitForSelector('.kpis');
+  assert.equal(await p4.$('#transfer-notice'), null, 'encart retiré une fois les données là');
+  assert.equal((await storeOf(p4)('config/settings')).lastName, 'Exemple');
+  step('iPhone, appli installée vide : encart « Tu avais déjà commencé dans Safari ? », import en un geste');
 } finally {
   await browser.close();
   server.close();
