@@ -45,7 +45,14 @@ tutoiement ; tout ce que voit le client final (PDF, e-mails, relances) est au vo
   facture en cours dans les brouillons (`parkDraft()`). Les brouillons sont dans la sauvegarde.
 - Préférences locales (localStorage, par appareil) : `fanapa.draft.v1` (brouillon),
   `fanapa.backup.v1` (date de la dernière sauvegarde exportée), `fanapa.backup.snooze`,
-  `fanapa.install.snooze`, `fanapa.transfer.snooze`.
+  `fanapa.install.snooze`, `fanapa.transfer.snooze`, `fanapa.mail.cc` (« Me mettre en copie »).
+- Envoi (`openSend`) : destinataire = e-mail de la facture, sinon celui de la fiche client
+  (`clientEmailFor` ; l'e-mail n'est pas une mention légale, le prendre dans la fiche ne touche
+  pas la facture). Une adresse tapée dans « À » est enregistrée dans la fiche si elle n'en a pas
+  (`rememberClientEmail`, jamais d'écrasement). Liens Mail / Gmail / Outlook avec `cc` si « Me
+  mettre en copie ». Sur téléphone (appli autonome), le bouton « Envoyer à … » partage le PDF,
+  l'objet et le message et copie l'adresse : la Web Share API ne permet pas de remplir le
+  destinataire. La variante « adresse déjà remplie » (mailto) oblige à joindre le PDF à la main.
 - « Ma structure » s'enregistre toute seule (jamais de saisie perdue à la fermeture) :
   `scheduleSettingsSave()` 0,6 s après chaque saisie, `saveSettingsNow()` en quittant l'écran,
   au passage en arrière-plan et à la fermeture ; une écriture à la fois (`S.settingsSaving`).

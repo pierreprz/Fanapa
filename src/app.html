@@ -674,6 +674,7 @@ const S = {
   got: { settings: false, invoices: false, clients: false, logo: false, drafts: false }, drafts: [],
   view: 'factures', draft: null, editSettings: null, settingsDirty: false,
   settingsSaving: null, settingsAgain: false, saveError: false, settingsWriteId: '',
+  sendInvoice: null, // facture dont la feuille d'envoi est ouverte
   filter: 'all', q: '', year: NOW_YEAR, cq: '', busy: false
 };
 const settings = () => deepMerge(DEFAULT_SETTINGS, S.settingsRaw || {});
@@ -1748,13 +1749,35 @@ const shareHint = () => STANDALONE ? (coarse() && typeof navigator.canShare === 
 // Partage direct « PDF + message » (version autonome sur téléphone)
 const canShareMail = () => !!(S.share && typeof S.share.available === 'function' && S.share.available());
 function findInv(n) { return S.invoices.find(x => x.number === n); }
-function mailLinks(to, subject, body) {
+function mailLinks(to, subject, body, cc) {
   const crlf = body.replace(/\r?\n/g, '\r\n');
+  const q = (k, v) => (v ? '&' + k + '=' + encodeURIComponent(v) : '');
   return {
-    mailto: 'mailto:' + encodeURIComponent(to).replace(/%40/g, '@') + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(crlf),
-    gmail: 'https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(to) + '&su=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body),
-    outlook: 'https://outlook.live.com/mail/0/deeplink/compose?to=' + encodeURIComponent(to) + '&subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body)
+    mailto: 'mailto:' + encodeURIComponent(to).replace(/%40/g, '@') + '?subject=' + encodeURIComponent(subject) + q('cc', cc) + '&body=' + encodeURIComponent(crlf),
+    gmail: 'https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(to) + q('cc', cc) + '&su=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body),
+    outlook: 'https://outlook.live.com/mail/0/deeplink/compose?to=' + encodeURIComponent(to) + q('cc', cc) + '&subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body)
   };
+}
+/* Destinataire : l'adresse tapée sur la facture, sinon celle de la fiche client (ajoutée après coup,
+   par exemple). L'e-mail n'est pas une mention de la facture : la prendre dans la fiche ne la modifie pas. */
+const MAIL_CC_KEY = 'fanapa.mail.cc';
+function clientCardFor(inv) { return inv && inv.clientId ? S.clients.find(c => c.id === inv.clientId) || null : null; }
+function clientEmailFor(inv) {
+  const own = T(inv && inv.client && inv.client.email);
+  if (own) return own;
+  const card = clientCardFor(inv);
+  return T(card && card.email);
+}
+// Adresse tapée au moment d'envoyer : enregistrée dans la fiche client si elle n'en avait pas (jamais écrasée)
+function rememberClientEmail(n, email) {
+  const inv = findInv(n);
+  const card = clientCardFor(inv);
+  if (!card || T(card.email) || !K.validEmail(email) || !canWrite()) return;
+  const nowIso = new Date().toISOString();
+  const doc = Object.assign(cleanClient(card), { id: card.id, email: email.trim(), createdAt: card.createdAt || nowIso, updatedAt: nowIso });
+  write(() => S.db.doc('clients/' + card.id).set(doc))
+    .then(() => { toast('Adresse enregistrée dans la fiche de ' + card.name); const h = $('#m-to-help'); if (h) h.textContent = 'Adresse enregistrée dans la fiche client.'; })
+    .catch(() => { });
 }
 // mode 'reminder' : relance d'une facture impayée (même parcours, autre message)
 function openSend(n, mode) {
@@ -1763,11 +1786,21 @@ function openSend(n, mode) {
   const reminder = mode === 'reminder' && inv.kind !== 'credit';
   const count = (Number(st.reminders) || 0) + 1;
   const m = reminder ? K.buildReminderMail(inv, settings(), count) : K.buildMail(inv, settings());
-  const to = (inv.client && inv.client.email) || '';
+  const to = clientEmailFor(inv);
+  const card = clientCardFor(inv);
+  const me = T(settings().email);
   const paid = !reminder && !!st.paidAt;
   const doc = inv.kind === 'credit' ? 'l’avoir' : 'la facture';
   const dataPaid = paid ? ' data-paid="1"' : '';
-  const mailbox = '<div class="mailbox">' + field('À', '<input type="email" id="m-to" value="' + esc(to) + '" placeholder="adresse@du-client.fr" inputmode="email">') +
+  const share = canShareMail();
+  S.sendInvoice = n;
+  const toHelp = to
+    ? (T(inv.client && inv.client.email) ? 'Adresse du client.' : 'Adresse reprise de la fiche client.')
+    : (card ? 'Pas encore d’adresse dans la fiche : tape-la ici, elle y sera enregistrée pour les prochaines fois.' : 'Tape l’adresse e-mail du client.');
+  // « Me mettre en copie » : pour garder une copie de chaque envoi dans sa boîte (mémorisé)
+  const ccBox = me ? '<label class="check" style="margin:0"><input type="checkbox" id="m-cc"' + (LS.get(MAIL_CC_KEY) ? ' checked' : '') + '> Me mettre en copie (' + esc(me) + ')</label>' : '';
+  const mailbox = '<div class="mailbox">' + field('À', '<input type="email" id="m-to" value="' + esc(to) + '" placeholder="adresse@du-client.fr" inputmode="email" autocomplete="off"><small id="m-to-help">' + esc(toHelp) + '</small>') +
+    (share ? '' : ccBox) +
     field('Objet', '<input type="text" id="m-subject" value="' + esc(m.subject) + '">') +
     field('Message', '<textarea id="m-body">' + esc(m.body) + '</textarea>') +
     '<div class="btn-row"><button type="button" class="btn small" data-act="copy" data-src="m-to">' + ic('copy') + 'Copier l’adresse</button><button type="button" class="btn small" data-act="copy" data-src="m-subject">' + ic('copy') + 'Copier l’objet</button><button type="button" class="btn small" data-act="copy" data-src="m-body">' + ic('copy') + 'Copier le message</button></div></div>';
@@ -1777,21 +1810,25 @@ function openSend(n, mode) {
     : '<div class="stp' + (st.sentAt ? ' done' : '') + '"><div><h3>C’est parti ?</h3><p>Note l’envoi pour suivre tes relances.</p>' +
       (st.sentAt ? '<p><b>Envoyée le ' + esc(K.fmtDate(st.sentAt)) + '</b></p>' : '<button type="button" class="btn" data-act="mark-sent" data-n="' + esc(n) + '">' + ic('check') + 'Marquer comme envoyée</button>') + '</div></div>';
   let steps;
-  if (canShareMail()) {
-    // Téléphone : un seul geste, le PDF arrive joint avec le message ; l'adresse est copiée au passage
-    steps = '<div class="stp" id="stp-pdf"><div><h3>Partage ' + doc + '</h3><p>Choisis Mail ou Gmail : le PDF est joint et le message déjà écrit. ' +
-      (to ? 'L’adresse du client est copiée au même moment : colle-la dans « À ».' : 'Ajoute l’adresse du client dans « À » (ou dans le message ci-dessous pour la copier).') + '</p>' +
-      '<button type="button" class="btn primary" data-act="share-mail" data-n="' + esc(n) + '"' + dataPaid + '>' + ic('send') + 'Partager ' + doc + (paid ? ' acquittée' : '') + '</button></div></div>' +
-      '<div class="stp"><div><h3>Le message</h3><p id="m-sum">' + (to ? 'Pour ' + esc(to) + '. ' : '') + 'Objet : ' + esc(m.subject) + '</p>' +
-      '<details class="alt"' + (to ? '' : ' open') + '><summary>Voir ou modifier le message</summary>' + mailbox + '</details>' +
-      '<details class="alt"><summary>Autre méthode : PDF puis messagerie</summary><p class="hint" style="margin:0 0 8px">Enregistre le PDF, puis ouvre ta messagerie : le mail s’ouvre rempli, il reste à joindre le PDF.</p>' +
+  if (share) {
+    // Téléphone : « Envoyer à … » ouvre le partage avec le PDF joint, l'objet et le message ; l'adresse est
+    // copiée au passage (Apple ne laisse pas une appli web remplir le destinataire ET joindre un fichier).
+    // Variante : Mail avec l'adresse déjà remplie, PDF à joindre depuis Fichiers.
+    steps = '<div class="stp" id="stp-pdf"><div><h3>Envoie ' + doc + '</h3>' +
+      '<button type="button" class="btn primary" data-act="share-mail" data-n="' + esc(n) + '"' + dataPaid + '>' + ic('send') + '<span id="m-send-label">' + esc(to ? 'Envoyer à ' + to : 'Envoyer ' + doc) + '</span></button>' +
+      '<p class="hint">Choisis <b>Mail</b> : ' + doc + (paid ? ' acquittée' : '') + ' est jointe, l’objet et le message sont écrits. L’adresse est copiée en même temps : touche « À », puis <b>Coller</b>.</p>' +
+      '<details class="alt"><summary>Préférer un mail avec l’adresse déjà remplie</summary><p class="hint" style="margin:0 0 8px">Ta messagerie s’ouvre avec l’adresse, l’objet et le message ; il reste à joindre le PDF. Enregistre-le d’abord dans Fichiers, puis ajoute-le dans le mail.</p>' +
+      (ccBox ? '<div style="margin:0 0 8px">' + ccBox + '</div>' : '') +
       '<div class="btn-row" style="margin-bottom:8px"><button type="button" class="btn small" data-act="send-pdf" data-n="' + esc(n) + '"' + dataPaid + '>' + ic('dl') + 'Enregistrer le PDF</button></div>' +
-      '<div class="btn-row" id="mail-links"></div><p class="addr" id="m-addr"></p></details></div></div>' + done;
+      '<div class="btn-row" id="mail-links"></div><p class="addr" id="m-addr"></p></details></div></div>' +
+      '<div class="stp"><div><h3>Le mail</h3>' + mailbox + '</div></div>' + done;
   } else {
-    steps = '<div class="stp" id="stp-pdf"><div><h3>Enregistre le PDF</h3><p>' + (shareHint() ? (STANDALONE ? 'Le' : 'Sur iPhone, le') + ' menu de partage s’ouvre : tu peux choisir Mail ou Gmail directement, la facture est déjà jointe. Colle ensuite le message ci-dessous.' : 'Le PDF est verrouillé : il ne peut pas être modifié.') + '</p>' +
-      '<button type="button" class="btn primary" data-act="send-pdf" data-n="' + esc(n) + '"' + dataPaid + '>' + ic('dl') + 'Enregistrer le PDF' + (paid ? ' acquitté' : '') + '</button></div></div>' +
-      '<div class="stp"><div><h3>Vérifie le message</h3>' + mailbox + '</div></div>' +
-      '<div class="stp"><div><h3>Ouvre ta messagerie</h3><p>Le mail s’ouvre déjà rempli : il te reste à joindre le PDF enregistré et à envoyer.</p>' +
+    // Ordinateur (et page claude.ai) : le mail s'ouvre avec l'adresse, la copie, l'objet et le message ; on y joint le PDF
+    steps = '<div class="stp"><div><h3>Le mail est prêt</h3><p>Destinataire, objet et message sont déjà remplis : vérifie-les si besoin.</p>' + mailbox + '</div></div>' +
+      '<div class="stp" id="stp-pdf"><div><h3>Envoie-le</h3><p>' + (shareHint()
+        ? 'Sur iPhone, « Enregistrer le PDF » ouvre le menu de partage : choisis Mail, la facture est jointe ; colle ensuite l’adresse et le message (boutons « Copier » ci-dessus). Sinon, ouvre ta messagerie ci-dessous : tout y est rempli, il reste à joindre le PDF.'
+        : 'Enregistre le PDF, puis ouvre ta messagerie : l’adresse, l’objet et le message y sont déjà remplis, il reste à joindre le PDF.') + '</p>' +
+      '<div class="btn-row" style="margin-bottom:8px"><button type="button" class="btn primary" data-act="send-pdf" data-n="' + esc(n) + '"' + dataPaid + '>' + ic('dl') + 'Enregistrer le PDF' + (paid ? ' acquitté' : '') + '</button></div>' +
       '<div class="btn-row" id="mail-links"></div><p class="addr" id="m-addr"></p></div></div>' + done;
   }
   const title = reminder
@@ -1805,12 +1842,19 @@ function openSend(n, mode) {
 function updateMailLinks() {
   const box = $('#mail-links'); if (!box) return;
   const to = $('#m-to').value.trim(), su = $('#m-subject').value, bo = $('#m-body').value;
-  const L = mailLinks(to, su, bo);
-  const sum = $('#m-sum'); if (sum) sum.textContent = (to ? 'Pour ' + to + '. ' : '') + 'Objet : ' + su;
-  box.innerHTML = '<a class="btn navy" href="' + esc(L.gmail) + '" target="_blank" rel="noopener">' + ic('mail') + 'Gmail</a>' +
-    '<a class="btn" href="' + esc(L.mailto) + '">' + ic('mail') + 'App Mail</a>' +
-    '<a class="btn" href="' + esc(L.outlook) + '" target="_blank" rel="noopener">' + ic('ext') + 'Outlook</a>';
-  $('#m-addr').textContent = to ? 'Destinataire : ' + to + (K.validEmail(to) ? '' : ' (adresse à vérifier)') : 'Ajoute l’adresse e-mail du client ci-dessus.';
+  const ccBox = $('#m-cc');
+  const cc = ccBox && ccBox.checked ? T(settings().email) : '';
+  const L = mailLinks(to, su, bo, cc);
+  const lbl = $('#m-send-label');
+  if (lbl) lbl.textContent = to ? 'Envoyer à ' + to : 'Envoyer';
+  // Sur iPhone, « Mail » ouvre l'appli de messagerie par défaut (Mail, ou Gmail si elle est choisie)
+  const gmail = '<a class="btn' + (isIOS ? '' : ' navy') + '" href="' + esc(L.gmail) + '" target="_blank" rel="noopener">' + ic('mail') + 'Gmail</a>';
+  const mail = '<a class="btn' + (isIOS ? ' navy' : '') + '" href="' + esc(L.mailto) + '">' + ic('mail') + 'Mail</a>';
+  const outlook = '<a class="btn" href="' + esc(L.outlook) + '" target="_blank" rel="noopener">' + ic('ext') + 'Outlook</a>';
+  box.innerHTML = isIOS ? mail + gmail + outlook : gmail + mail + outlook;
+  $('#m-addr').textContent = to
+    ? 'Destinataire : ' + to + (cc ? ' · en copie : ' + cc : '') + (K.validEmail(to) ? '' : ' (adresse à vérifier)')
+    : 'Ajoute l’adresse e-mail du client ci-dessus.';
 }
 async function copyText(text, btn) {
   let ok = false;
@@ -2572,11 +2616,14 @@ function onField(e) {
   if (t.id === 'list-q') { S.q = t.value; renderList(); return; }
   if (t.id === 'client-q') { S.cq = t.value; renderClients(); return; }
   if (t.id === 'm-to' || t.id === 'm-subject' || t.id === 'm-body') { updateMailLinks(); return; }
+  if (t.id === 'm-cc') { LS.set(MAIL_CC_KEY, !!t.checked); updateMailLinks(); return; }
 }
 document.addEventListener('input', onField);
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.type === 'checkbox') { onField(e); return; }
+  // Adresse tapée au moment d'envoyer : gardée dans la fiche client pour les prochaines fois
+  if (t.id === 'm-to') { rememberClientEmail(S.sendInvoice, t.value.trim()); return; }
   if (t.id === 'client-select') {
     const c = S.clients.find(x => x.id === t.value);
     saveDraftClientNow(); // le client tapé jusqu'ici garde sa fiche

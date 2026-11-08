@@ -341,6 +341,8 @@ try {
   await newInvoice(p3, { name: 'M. Paul Durand', line1: '8 rue Battant', email: 'paul.durand@exemple.fr', qty: 1 });
   await p3.click('.sheet [data-act="send"]');
   await p3.waitForSelector('[data-act="share-mail"]');
+  assert.equal(await p3.textContent('#m-send-label'), 'Envoyer à paul.durand@exemple.fr', 'le bouton annonce le destinataire');
+  assert.ok((await p3.$$eval('#mail-links a', as => as.map(a => a.href)))[0].startsWith('mailto:paul.durand@exemple.fr'), 'variante Mail : adresse déjà remplie');
   await p3.waitForTimeout(400);
   await p3.screenshot({ path: join(OUT, '10-iphone-envoi.png') });
   await p3.click('[data-act="share-mail"]');
@@ -352,7 +354,7 @@ try {
   assert.ok(shared.files[0].size > 50000);
   assert.match(shared.text, /^Bonjour M\. Paul Durand,/);
   assert.match(shared.title, /^Facture FA-\d{4}-001/);
-  step('iPhone : « Partager la facture » ouvre le partage avec le PDF joint, l’objet et le message');
+  step('iPhone : « Envoyer à l’adresse du client » ouvre le partage avec le PDF joint, l’objet et le message ; variante Mail avec l’adresse remplie');
 
   /* ================= 4. iPhone, appli installée encore vide : récupérer ce qui a été saisi dans Safari ================= */
   const ctx4 = await browser.newContext({ ...iphone, locale: 'fr-FR' });
@@ -506,6 +508,44 @@ try {
   await p6.click('.tabs [data-go="nouvelle"]');
   assert.equal(await ticket(p6), `FA-${YEAR}-003`, 'aucun trou : la suivante reste 003');
   step('brouillon sans numéro (même incomplet), validation définitive 001 puis 002 automatiques, facture validée non modifiable, numérotation verrouillée, brouillon supprimé sans trou');
+
+  // 7. Envoi : le destinataire vient de la fiche client ; une adresse tapée à l'envoi y est gardée ; copie possible
+  const cardOf = name => p6.evaluate(nm => new Promise(res => {
+    const rq = indexedDB.open('fanapa-factures', 1);
+    rq.onsuccess = () => {
+      const tx = rq.result.transaction('docs'), st = tx.objectStore('docs'), k = st.getAllKeys(), v = st.getAll();
+      tx.oncomplete = () => res(k.result.map((key, i) => [String(key), v.result[i]]).filter(([key, val]) => key.startsWith('clients/') && val.name === nm).map(([, val]) => val)[0] || null);
+    };
+  }), name);
+  const openSendFor = async num => {
+    await p6.click('.tabs [data-go="factures"]');
+    await p6.click(`.row[data-n="${num}"]`);
+    await p6.click('.sheet [data-act="send"]');
+    await p6.waitForSelector('#m-to');
+  };
+  await openSendFor(`FA-${YEAR}-002`);                        // Mme Alice Roux : facture et fiche sans e-mail
+  assert.equal(await p6.inputValue('#m-to'), '');
+  assert.match(await p6.textContent('#m-to-help'), /elle y sera enregistrée/);
+  await p6.fill('#m-to', 'alice@exemple.fr');
+  await p6.press('#m-to', 'Tab');                              // en quittant le champ, l'adresse rejoint la fiche
+  await until6(async () => ((await cardOf('Mme Alice Roux')) || {}).email === 'alice@exemple.fr');
+  assert.equal((await cardOf('Mme Alice Roux')).email, 'alice@exemple.fr');
+  await p6.click('.sheet [data-act="close"]');
+  await openSendFor(`FA-${YEAR}-002`);
+  assert.equal(await p6.inputValue('#m-to'), 'alice@exemple.fr', 'destinataire repris de la fiche client');
+  assert.match(await p6.textContent('#m-to-help'), /fiche client/);
+  let hrefs = await p6.$$eval('#mail-links a', as => as.map(a => a.href));
+  assert.ok(hrefs.some(h => h.startsWith('mailto:alice@exemple.fr')) && hrefs.some(h => /mail\.google\.com.*to=alice%40exemple\.fr/.test(h)));
+  await p6.check('#m-cc');                                     // « Me mettre en copie »
+  hrefs = await p6.$$eval('#mail-links a', as => as.map(a => a.href));
+  assert.ok(hrefs.every(h => /cc=contact%40fanapa\.fr/.test(h)), 'copie à soi dans Mail, Gmail et Outlook');
+  await p6.waitForTimeout(400);
+  await p6.screenshot({ path: join(OUT, '14-envoi-destinataire.png') });
+  await p6.click('.sheet [data-act="close"]');
+  await openSendFor(`FA-${YEAR}-002`);
+  assert.equal(await p6.isChecked('#m-cc'), true, 'choix « copie » mémorisé');
+  await p6.click('.sheet [data-act="close"]');
+  step('envoi : destinataire repris de la fiche client, adresse tapée à l’envoi gardée dans la fiche, « Me mettre en copie » mémorisé');
 } finally {
   await browser.close();
   server.close();
