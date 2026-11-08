@@ -574,6 +574,7 @@ body.v-nouvelle .toast { bottom: calc(var(--tabbar) + var(--safe-b) + 92px); }
 <script>
 'use strict';
 (function () {
+try { document.documentElement.lang = 'fr'; } catch (e) { /* page claude.ai : la langue n'est pas dans le squelette */ }
 const K = window.FanapaCore;
 const LOGO_PDF = '{{LOGO_PDF}}';
 const LOGO_PDF_SIZE = { w: 720, h: 519 };
@@ -1212,7 +1213,14 @@ async function claimNumber(kind, iso, build) {
       try { lease = await ref.acquire({ holder: TAB_ID, ttlMs: 8000 }); }
       catch (e) { if (!/capability_(removed|disabled)/.test((e && e.code) || '')) throw e; }
     }
-    if (!lease.acquired) { if (++waits > 6) break; await sleep(900 + Math.random() * 600); continue; }
+    if (!lease.acquired) {
+      // Quelqu'un d'autre réserve ce numéro : s'il est déjà enregistré, on passe au suivant
+      // (aucun trou possible), sinon on attend la fin de sa réservation.
+      const peek = await ref.get().catch(() => null);
+      const taken = peek && peek.exists ? peek.data() : null;
+      if (taken && taken.number) { seq++; continue; }
+      if (++waits > 6) break; await sleep(900 + Math.random() * 600); continue;
+    }
     const snap = await ref.get();
     const ex = snap.exists ? snap.data() : null;
     if (ex && ex.number) { seq++; continue; }
@@ -1990,7 +1998,9 @@ function renderSettings(mode) {
     (S.logoDoc ? '<button type="button" class="btn small ghost" data-act="logo-reset">Revenir au logo FAN’APA</button>' : '') + '</div></div></div>' +
 
     installCardHTML() +
-    '<div class="card" id="backup-card"><div class="card-h"><div><h2>Sauvegarde</h2><p>' + (STANDALONE ? 'Tes données sont enregistrées sur cet appareil uniquement : exporte une sauvegarde régulièrement, tes factures sont à conserver 10 ans.' : 'Tes factures sont à conserver 10 ans') + '</p></div></div>' +
+    '<div class="card" id="backup-card"><div class="card-h"><div><h2>Sauvegarde</h2><p>' + (STANDALONE
+      ? 'Tes données sont enregistrées sur cet appareil uniquement : exporte une sauvegarde régulièrement, tes factures sont à conserver 10 ans.'
+      : 'Tes factures sont enregistrées en ligne avec cette page et se retrouvent sur tous tes appareils. Garde quand même une sauvegarde de temps en temps : elles sont à conserver 10 ans.') + '</p></div></div>' +
     (STANDALONE ? '<p class="persist"><span class="dot ' + (bk && !bkSince ? 'ok' : 'warn') + '">' + (bk && !bkSince ? '✓' : '!') + '</span><span>' + esc(backupWhen()) +
       (bkSince ? ' · ' + bkSince + ' facture' + (bkSince > 1 ? 's' : '') + (bk ? ' depuis' : '') + ' à mettre à l’abri' : '') + '.</span></p><p class="persist" id="persist-state"></p>' : '') +
     '<div class="btn-row"><button type="button" class="btn small" data-act="backup">' + ic('dl') + 'Exporter une sauvegarde (JSON)</button>' +
@@ -2236,7 +2246,8 @@ document.addEventListener('visibilitychange', () => {
   if (S.view === 'factures') renderList();
 });
 window.addEventListener('pagehide', flushDraft);
-window.addEventListener('beforeunload', e => { flushDraft(); if (S.settingsDirty || S.busy) { e.preventDefault(); e.returnValue = ''; } });
+// Avertissement avant de fermer : version autonome seulement (le cadre claude.ai ne l'affiche pas)
+window.addEventListener('beforeunload', e => { flushDraft(); if (STANDALONE && (S.settingsDirty || S.busy)) { e.preventDefault(); e.returnValue = ''; } });
 // Téléphone : pendant la saisie, on masque les barres du bas (voir body.typing)
 // Seulement les champs qui ouvrent un clavier (pas les dates ni les listes, qui ouvrent une roue)
 const TYPING_SEL = 'input:not([type]), input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input[type="search"], input[type="url"], textarea';

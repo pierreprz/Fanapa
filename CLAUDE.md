@@ -49,7 +49,15 @@ tutoiement ; tout ce que voit le client final (PDF, e-mails, relances) est au vo
   `_headers` (CSP, nosniff, `no-cache` sur sw.js), copié dans `app/_headers`. L'appli enregistre
   le service worker elle-même (`initPwa`) et affiche « Nouvelle version prête » au
   `controllerchange`. Toute ressource externe nouvelle doit être ajoutée à la CSP de `_headers`.
-- Mise en ligne : `netlify.toml` (publish `app`, build `node build/build.mjs`, sans dépendance).
+- Mise en ligne actuelle : page claude.ai privée **https://claude.ai/artifact/GuMWU7wDLNb8FW76ZGpfbc**
+  (fichier publié : `dist/artifact/index.html`, contenu sans squelette HTML, `<title>` en tête :
+  claude.ai ajoute doctype, head et body). Pour la mettre à jour : `npm run build`, puis outil
+  Artifact, `action: publish`, `url` ci-dessus, en OMETTANT `capabilities` pour garder la
+  déclaration en place : `db` avec la règle racine `{path: "", read: "admin", write: "admin"}`
+  (données de facturation lisibles par le propriétaire et les éditeurs seulement), `downloads`,
+  `user`. Ne jamais supprimer cette page : sa base de données (les factures) serait effacée.
+- Mise en ligne de la version autonome (facultatif) : `netlify.toml` (publish `app`, build
+  `node build/build.mjs`, sans dépendance).
 
 ## Invariants (obligations légales : ne jamais casser)
 1. Numérotation chronologique et continue, sans trou ni doublon : `PREFIXE-AAAA-NNN`, série

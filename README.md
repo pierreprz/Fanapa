@@ -13,10 +13,27 @@ Appli de facturation pour FAN'APA, micro-entreprise d'activité physique adapté
 - appli installable sur le téléphone, qui fonctionne **sans réseau** et se met à jour toute seule ;
 - rappel de **sauvegarde** tant que des factures ne sont que sur l'appareil.
 
-## Mettre l'appli en ligne (Netlify)
+## L'appli en ligne sur claude.ai (version actuelle)
 
-Le dossier `app/` est un site statique complet (aucun serveur nécessaire). Deux façons de le
-publier, au choix :
+**Adresse : https://claude.ai/artifact/GuMWU7wDLNb8FW76ZGpfbc** (page privée : toi seul·e peux
+l'ouvrir, connecté·e à ton compte Claude).
+
+- Les factures, clients et réglages sont enregistrés **en ligne avec la page** : on les retrouve
+  sur le téléphone comme sur l'ordinateur, et supprimer une icône ne fait rien perdre.
+- Seuls le propriétaire et les éditeurs que tu ajouterais peuvent lire ou modifier ces données :
+  même si le lien est partagé, un simple lecteur ne voit aucune facture.
+- Sur iPhone, ouvre le lien dans **l'app Claude** : « Enregistrer le PDF » y ouvre le menu de
+  partage, donc Mail ou Gmail avec la facture jointe. Il faut une connexion internet.
+- **Ne supprime jamais cette page** : ses données seraient effacées avec elle. Exporte de temps en
+  temps une sauvegarde (Ma structure → Sauvegarde).
+
+Mettre à jour la page après une modification : `npm run build`, puis republier
+`dist/artifact/index.html` à la même adresse (voir CLAUDE.md).
+
+## Mettre la version autonome en ligne (facultatif, Netlify)
+
+Le dossier `app/` est un site statique complet (aucun serveur nécessaire) qui marche aussi sans
+réseau. Deux façons de le publier, au choix :
 
 **A. Depuis GitHub (recommandé : chaque modification se publie toute seule)**
 
@@ -34,7 +51,9 @@ publier, au choix :
 
 Les en-têtes de sécurité et de mise à jour (`app/_headers`) s'appliquent dans les deux cas.
 
-## Installer l'appli sur iPhone
+## Installer la version autonome sur iPhone
+
+(Pour la version claude.ai, il suffit d'ouvrir son lien dans l'app Claude.)
 
 1. Ouvre l'adresse du site dans **Safari**.
 2. Touche le bouton **Partager** (carré avec une flèche vers le haut ; sur iOS 26, il est dans le

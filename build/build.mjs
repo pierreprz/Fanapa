@@ -61,8 +61,24 @@ function render({ fonts, head, adapterTag, jspdfUrls }) {
 }
 const kb = s => Math.round(Buffer.byteLength(s) / 1024) + ' Ko';
 
-/* ---------- 1. Version claude.ai (artifact) ---------- */
-const artifact = render({ fonts: GOOGLE_FONTS, head: '', adapterTag: '', jspdfUrls: CDN_JSPDF });
+/* ---------- 1. Version claude.ai (artifact) ----------
+   claude.ai enveloppe la page dans son propre squelette (doctype, <head>, <body>) :
+   on publie le contenu seul, <title> en tête, puis polices, styles et corps. */
+function asArtifactPage(html) {
+  const count = re => (html.match(re) || []).length;
+  if (count(/<head>/g) !== 1 || count(/<\/head>/g) !== 1 || count(/<body[\s>]/g) !== 1 || count(/<\/body>/g) !== 1) {
+    throw new Error('Gabarit inattendu : squelette HTML à revoir pour la version claude.ai');
+  }
+  const head = html.slice(html.indexOf('<head>') + 6, html.indexOf('</head>'))
+    .replace(/<meta charset[^>]*>\s*/i, '')          // fournis par le squelette de claude.ai
+    .replace(/<meta name="viewport"[^>]*>\s*/i, '');
+  const title = (head.match(/<title>[\s\S]*?<\/title>/) || [''])[0];
+  if (!title) throw new Error('<title> manquant');
+  const bodyOpen = html.match(/<body[^>]*>/)[0];
+  const body = html.slice(html.indexOf(bodyOpen) + bodyOpen.length, html.indexOf('</body>'));
+  return title + '\n' + head.replace(title, '').trim() + '\n' + body.trim() + '\n';
+}
+const artifact = asArtifactPage(render({ fonts: GOOGLE_FONTS, head: '', adapterTag: '', jspdfUrls: CDN_JSPDF }));
 mkdirSync(join(ROOT, 'dist', 'artifact'), { recursive: true });
 writeFileSync(join(ROOT, 'dist', 'artifact', 'index.html'), artifact);
 console.log('dist/artifact/index.html', kb(artifact));
