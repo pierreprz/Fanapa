@@ -3,7 +3,10 @@
 Appli de facturation pour FAN'APA, micro-entreprise d'activité physique adaptée :
 
 - factures conformes (toutes les mentions obligatoires sont vérifiées avant validation) ;
-- numérotation automatique et continue : FA-2026-001, puis 002, etc. ;
+- **brouillons** : une facture se garde en brouillon (sans numéro, modifiable, même incomplète)
+  ou se valide **définitivement** ; validée, elle ne se modifie plus et s'annule par un avoir ;
+- numérotation automatique et continue : FA-2026-001, puis 002, etc. ; impossible de choisir ou
+  de sauter un numéro (réglages verrouillés dès la première facture) ;
 - PDF avec le logo, protégé contre la modification ;
 - envoi au client : sur iPhone, un seul geste ouvre Mail ou Gmail avec le PDF joint et le message
   déjà écrit ; sur ordinateur, e-mail pré-rempli (Gmail, Mail, Outlook) ;

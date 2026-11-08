@@ -418,6 +418,94 @@ try {
   await p5.waitForTimeout(1500);
   assert.deepEqual(await names(), []);
   step('clients conservés : fiche refermée sans « Enregistrer », client d’une facture non validée (sans doublon), case décochée, suppression');
+
+  /* ================= 6. Brouillons, validation définitive, numérotation imposée ================= */
+  const ctx6 = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'fr-FR' });
+  const p6 = await ctx6.newPage();
+  watch(p6, '[6]');
+  const store6 = storeOf(p6);
+  const draftsIn = () => p6.evaluate(() => new Promise(res => {
+    const rq = indexedDB.open('fanapa-factures', 1);
+    rq.onsuccess = () => {
+      const tx = rq.result.transaction('docs'), k = tx.objectStore('docs').getAllKeys();
+      tx.oncomplete = () => res(k.result.map(String).filter(key => key.startsWith('drafts/')));
+    };
+  }));
+  const until6 = async cond => { for (let i = 0; i < 50 && !(await cond()); i++) await p6.waitForTimeout(100); };
+  await p6.goto(`${BASE}/index.html#structure`);
+  await ready(p6);
+  assert.ok(await p6.$('[data-s="numbering.start"]'), 'avant la première facture, la reprise d’un autre outil reste possible');
+  await fillStructure(p6);
+  // 1. Une facture incomplète (sans adresse client) se garde en brouillon, sans numéro
+  await p6.click('.tabs [data-go="nouvelle"]');
+  await p6.fill('[data-b="client.name"]', 'Mme Alice Roux');
+  await p6.fill('.line [data-l="unit"]', '50');
+  await blur(p6);
+  await p6.click('#btn-validate');
+  await p6.waitForSelector('.sheet [data-act="draft-save"]');
+  assert.equal(await p6.$('[data-act="confirm-validate"]'), null, 'incomplète : pas de validation définitive');
+  await p6.click('.sheet [data-act="draft-save"]');
+  await p6.waitForSelector('#drafts-block .row[data-s="draft"]');
+  await p6.waitForTimeout(400);
+  await p6.screenshot({ path: join(OUT, '13-brouillons.png') });
+  assert.equal((await draftsIn()).length, 1);
+  await p6.click('.tabs [data-go="nouvelle"]');
+  assert.equal(await ticket(p6), `FA-${YEAR}-001`, 'un brouillon ne prend pas de numéro');
+  // 2. Une facture complète validée définitivement prend 001
+  await newInvoice(p6, { name: 'M. Bruno Leroy', line1: '3 rue Pasteur', email: 'bruno@exemple.fr' });
+  assert.ok(await store6(`invoices/FA-${YEAR}-001`));
+  await p6.click('.sheet [data-act="close"]');
+  // 3. Le brouillon survit à la réouverture, se reprend, se complète, prend 002 tout seul et quitte les brouillons
+  await p6.reload();
+  await ready(p6);
+  await p6.click('.tabs [data-go="factures"]');
+  await p6.click('#drafts-block .row[data-s="draft"]');
+  await p6.click('.sheet [data-act="draft-resume"]');
+  assert.equal(await p6.inputValue('[data-b="client.name"]'), 'Mme Alice Roux');
+  await p6.fill('[data-b="client.address.line1"]', '9 rue Victor Hugo');
+  await p6.fill('[data-b="client.address.zip"]', '25000');
+  await p6.fill('[data-b="client.address.city"]', 'Besançon');
+  await blur(p6);
+  await p6.click('#btn-validate');
+  await p6.waitForSelector('[data-act="confirm-validate"]');
+  await p6.waitForTimeout(400);
+  await p6.screenshot({ path: join(OUT, '12-enregistrer-la-facture.png') });
+  await p6.click('[data-act="confirm-validate"]');
+  await p6.waitForSelector('.success');
+  assert.equal((await store6(`invoices/FA-${YEAR}-002`)).client.name, 'Mme Alice Roux', 'numéro suivant, attribué automatiquement');
+  await until6(async () => (await draftsIn()).length === 0);
+  assert.equal((await draftsIn()).length, 0, 'brouillon retiré après validation');
+  await p6.click('.sheet [data-act="close"]');
+  // 4. Une facture validée ne se modifie pas et ne se supprime pas : on l'annule par un avoir
+  await p6.click('.tabs [data-go="factures"]');
+  await p6.click(`.row[data-n="FA-${YEAR}-001"]`);
+  assert.ok(await p6.$('.sheet [data-act="credit"]'), 'annulation par avoir proposée');
+  assert.equal(await p6.$('.sheet [data-act="edit"], .sheet [data-act="delete"], .sheet [data-act="draft-resume"]'), null, 'ni modification ni suppression');
+  await p6.click('.sheet [data-act="close"]');
+  // 5. Numérotation verrouillée : plus de « Démarrer à » ni de préfixe (sinon on pourrait sauter de 002 à 010)
+  await p6.click('.tabs [data-go="structure"]');
+  assert.equal(await p6.$('[data-s="numbering.start"]'), null);
+  assert.equal(await p6.$('[data-s="numbering.prefix"]'), null);
+  assert.match(await p6.textContent('#numbering-card'), /Verrouillée/);
+  assert.match(await p6.textContent('#next-prev'), new RegExp(`FA-${YEAR}-003`));
+  // 6. « Nouvelle facture » met de côté la facture en cours ; un brouillon se supprime
+  await p6.click('.tabs [data-go="nouvelle"]');
+  await p6.fill('[data-b="client.name"]', 'Brouillon à jeter');
+  await blur(p6);
+  await p6.click('.tabs [data-go="factures"]');
+  await p6.click('[data-act="new-invoice"]');
+  // La facture en cours est d'abord rangée dans les brouillons, puis l'éditeur repart vierge
+  await p6.waitForFunction(() => { const i = document.querySelector('[data-b="client.name"]'); return document.body.classList.contains('v-nouvelle') && i && i.value === ''; });
+  await until6(async () => (await draftsIn()).length === 1);
+  await p6.click('.tabs [data-go="factures"]');
+  await p6.click('#drafts-block .row[data-s="draft"]');
+  await p6.click('.sheet [data-act="draft-del"]');
+  await p6.click('[data-act="draft-del-ok"]');
+  await p6.waitForFunction(() => !document.querySelector('#drafts-block'));
+  assert.equal((await draftsIn()).length, 0);
+  await p6.click('.tabs [data-go="nouvelle"]');
+  assert.equal(await ticket(p6), `FA-${YEAR}-003`, 'aucun trou : la suivante reste 003');
+  step('brouillon sans numéro (même incomplet), validation définitive 001 puis 002 automatiques, facture validée non modifiable, numérotation verrouillée, brouillon supprimé sans trou');
 } finally {
   await browser.close();
   server.close();

@@ -34,7 +34,15 @@ tutoiement ; tout ce que voit le client final (PDF, e-mails, relances) est au vo
   même interface (`doc`/`collection`, `get`/`set`/`update`/`delete`, `onSnapshot`, `acquire`)
   sans toucher à l'interface.
 - Chemins : `config/settings`, `config/logo`, `clients/<id>`, `invoices/<numéro>`
-  (l'identifiant du document est le numéro de facture).
+  (l'identifiant du document est le numéro de facture), `drafts/<id>` (brouillons, sans numéro).
+- Brouillons : le bouton « Enregistrer » de l'éditeur ouvre le choix (`openValidate`) entre
+  « Enregistrer en brouillon » (`saveAsDraft()`, même incomplet) et « Valider définitivement »
+  (`doValidate()` : numéro suivant via `claimNumber()`, puis le document `drafts/<id>` d'origine
+  est supprimé). Un brouillon repris (`resumeDraft()`) garde son `draftId` et se tient à jour
+  tout seul (`scheduleDraftDocSave()`, 1,5 s). Tout brouillon lu (base partagée ou sauvegarde)
+  passe par `cleanDraftDoc()`. Si le brouillon ouvert disparaît (validé ou supprimé sur un autre
+  appareil), l'éditeur se referme au lieu de le recréer. « Nouvelle facture » range d'abord la
+  facture en cours dans les brouillons (`parkDraft()`). Les brouillons sont dans la sauvegarde.
 - Préférences locales (localStorage, par appareil) : `fanapa.draft.v1` (brouillon),
   `fanapa.backup.v1` (date de la dernière sauvegarde exportée), `fanapa.backup.snooze`,
   `fanapa.install.snooze`, `fanapa.transfer.snooze`.
@@ -86,7 +94,10 @@ tutoiement ; tout ce que voit le client final (PDF, e-mails, relances) est au vo
 ## Invariants (obligations légales : ne jamais casser)
 1. Numérotation chronologique et continue, sans trou ni doublon : `PREFIXE-AAAA-NNN`, série
    annuelle. Numéro attribué seulement à la validation par `claimNumber()`
-   (acquire → get → set). Aucune suppression de facture.
+   (acquire → get → set), jamais choisi à la main : dès la première facture
+   (`numberingLocked()`), « Démarrer à » et les préfixes disparaissent de Ma structure et
+   `normalizeSettings()` conserve la numérotation enregistrée. Un brouillon n'a pas de numéro.
+   Aucune suppression de facture.
 2. Facture validée immuable : seul `status` évolue (`sentAt`, `remindedAt`, `reminders`,
    `paidAt`, `paidMethod`, `cancelledBy`, `cancelledAt`). Corriger = avoir (`kind: 'credit'`,
    série AV, `creditOf`).

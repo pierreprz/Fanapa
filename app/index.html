@@ -439,6 +439,14 @@ details.alt { margin-top: 12px; border-top: 1px dashed var(--line); padding-top:
 details.alt summary { cursor: pointer; color: var(--teal-deep); font-weight: 500; font-size: 13.5px; list-style-position: inside; }
 details.alt[open] summary { margin-bottom: 10px; }
 .ccard .due { color: var(--warn); font-weight: 500; }
+/* Brouillons : sans numéro, en tête de la liste des factures */
+.drafts { margin: 0 0 14px; }
+.drafts-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; margin: 0 0 8px; }
+.drafts-h h2 { font-size: 16px; font-weight: 700; }
+.drafts-h h2 i { font-style: normal; font-size: 12px; color: var(--muted); margin-left: 4px; }
+.drafts-h p { margin: 0; font-size: 12.5px; color: var(--muted); }
+.pill.s-draft { background: var(--paper); color: var(--muted); border: 1px dashed #B9C9CF; }
+.row[data-s="draft"]::before { background: repeating-linear-gradient(to bottom, var(--soft) 0 4px, transparent 4px 7px); }
 /* Téléphone : pendant la saisie, les barres fixes du bas laissent la place au clavier */
 @media (max-width: 959px) and (pointer: coarse) {
   body.typing .tabs, body.typing .totalbar { display: none; }
@@ -520,7 +528,7 @@ body.v-nouvelle .toast { bottom: calc(var(--tabbar) + var(--safe-b) + 92px); }
     <section class="view" id="view-factures" aria-labelledby="h-factures">
       <div class="page-h">
         <div><h1 id="h-factures">Factures</h1><p id="list-sub">Suivi de tes factures et encaissements</p></div>
-        <button type="button" class="btn primary" data-go="nouvelle"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Nouvelle facture</button>
+        <button type="button" class="btn primary" data-act="new-invoice"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Nouvelle facture</button>
       </div>
       <div id="list-body"></div>
     </section>
@@ -534,14 +542,14 @@ body.v-nouvelle .toast { bottom: calc(var(--tabbar) + var(--safe-b) + 92px); }
             <svg class="wave" viewBox="0 0 340 120" aria-hidden="true"><path d="M0 92 C 60 60, 120 118, 190 86 S 300 40, 340 58 L340 120 L0 120Z" fill="#127A83" opacity=".55"/><path d="M0 104 C 70 80, 130 124, 200 100 S 300 70, 340 80" fill="none" stroke="#7AB648" stroke-width="5" stroke-linecap="round"/><path d="M40 112 C 110 96, 170 122, 240 108 S 320 92, 340 96" fill="none" stroke="#1A96A0" stroke-width="3" stroke-linecap="round" opacity=".9"/></svg>
             <span class="eyebrow"><i></i><span id="tk-eyebrow">Brouillon · prochain numéro</span></span>
             <div class="no" aria-live="polite"><span class="ser" id="tk-ser">FA-2026-</span><span class="seq" id="tk-seq">…</span></div>
-            <p id="tk-text">Le numéro est attribué à la validation. Une fois validée, la facture est verrouillée.</p>
+            <p id="tk-text">Attribué automatiquement à la validation définitive, à la suite du précédent. Avant, tu peux garder la facture en brouillon.</p>
             <span class="stamp" aria-hidden="true">VALIDÉE</span>
           </div>
           <div id="ed-fields"></div>
           <div class="totalbar" id="totalbar">
             <div class="t"><b id="tb-total" class="num">0,00 €</b><span id="tb-mention">TVA non applicable, art. 293 B du CGI</span></div>
             <button type="button" class="btn t-preview" data-act="preview" aria-label="Aperçu de la facture"><svg class="i" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></svg><span class="lbl">Aperçu</span></button>
-            <button type="button" class="btn primary" data-act="validate" id="btn-validate"><svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>Valider</button>
+            <button type="button" class="btn primary" data-act="validate" id="btn-validate"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Enregistrer</button>
           </div>
         </div>
         <aside class="ed-preview" aria-label="Aperçu de la facture">
@@ -1630,7 +1638,7 @@ const S = {
   cl: null, db: null, user: null, dl: null, share: null,
   dbState: 'connecting', readOnly: false, fresh: false,
   settingsRaw: null, logoDoc: null, invoices: [], clients: [],
-  got: { settings: false, invoices: false, clients: false, logo: false },
+  got: { settings: false, invoices: false, clients: false, logo: false, drafts: false }, drafts: [],
   view: 'factures', draft: null, editSettings: null, settingsDirty: false,
   settingsSaving: null, settingsAgain: false, saveError: false, settingsWriteId: '',
   filter: 'all', q: '', year: NOW_YEAR, cq: '', busy: false
@@ -1648,6 +1656,8 @@ function newDraft(extra) {
   const d = {
     // clientNew : la fiche client a été créée depuis ce brouillon (on la tient à jour pendant la saisie)
     v: 1, pristine: true, clientId: null, client: blankClient(), saveClient: true, clientNew: false,
+    // draftId : brouillon enregistré dans la base (drafts/<id>) que l'éditeur est en train de modifier
+    draftId: null, savedAt: null,
     // dateAuto / serviceAuto : la date suit « aujourd'hui » tant qu'elle n'a pas été choisie à la main
     issueDate: t, dateAuto: true, service: { mode: 'single', date: t, from: '', to: '' }, serviceAuto: true,
     lines: [newLine(st.catalog[0])], term: st.defaults.term, dueDate: '',
@@ -1706,6 +1716,148 @@ function onSaveClientToggled(d, on) {
       Promise.resolve(draftClientSaving).then(() => write(() => S.db.doc('clients/' + id).delete())).catch(() => { });
     }
   }
+}
+/* =====================================================================
+   Brouillons enregistrés (drafts/<id>) : sans numéro, modifiables et supprimables.
+   Le numéro n'est attribué qu'à la validation définitive, à la suite du précédent :
+   un brouillon supprimé ne laisse donc aucun trou dans la numérotation.
+   ===================================================================== */
+const DRAFT_FIELDS = ['client', 'clientId', 'clientNew', 'saveClient', 'issueDate', 'dateAuto', 'service', 'serviceAuto', 'lines', 'term', 'dueDate', 'methods', 'notes'];
+// Un brouillon lu dans la base (écrit par un autre appareil) ou dans une sauvegarde est remis en forme
+function cleanDraftDoc(x) {
+  if (!x || typeof x !== 'object' || !ID_RE.test(String(x.id || ''))) return null;
+  const str = v => (typeof v === 'string' ? v.slice(0, 2000) : '');
+  const iso = v => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : '');
+  const obj = v => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+  const c = obj(x.client), a = obj(c.address), sv = obj(x.service);
+  const lines = (Array.isArray(x.lines) ? x.lines : []).slice(0, 200).filter(l => l && typeof l === 'object')
+    .map(l => ({ id: uid(), label: str(l.label), detail: str(l.detail), qty: num(l.qty), unit: Math.round(Number(l.unit) || 0) }));
+  const d = newDraft({
+    pristine: false,
+    client: { type: c.type === 'pro' ? 'pro' : 'particulier', name: str(c.name), contact: str(c.contact), address: { line1: str(a.line1), line2: str(a.line2), zip: str(a.zip), city: str(a.city) }, email: str(c.email), siren: str(c.siren) },
+    clientId: ID_RE.test(String(x.clientId || '')) ? String(x.clientId) : null,
+    saveClient: x.saveClient !== false,
+    issueDate: iso(x.issueDate) || K.todayISO(), dateAuto: x.dateAuto !== false,
+    service: { mode: sv.mode === 'period' ? 'period' : 'single', date: iso(sv.date), from: iso(sv.from), to: iso(sv.to) }, serviceAuto: x.serviceAuto !== false,
+    lines: lines.length ? lines : [newLine()],
+    term: ['reception', '15', '30', '45', 'custom'].includes(x.term) ? x.term : 'reception', dueDate: iso(x.dueDate),
+    methods: (Array.isArray(x.methods) ? x.methods : []).filter(m => K.METHODS.some(k => k.id === m)),
+    notes: str(x.notes), draftId: String(x.id), savedAt: typeof x.savedAt === 'string' ? x.savedAt.slice(0, 40) : null
+  });
+  d.clientNew = !!x.clientNew && !!d.clientId;
+  return { id: String(x.id), updatedAt: typeof x.updatedAt === 'string' ? x.updatedAt.slice(0, 40) : '', draft: d };
+}
+function draftBody(d, id, savedAt, updatedAt) {
+  const body = { id, v: 1, savedAt, updatedAt };
+  DRAFT_FIELDS.forEach(k => { body[k] = clone(d[k]); });
+  return body;
+}
+let draftDocTimer = null, draftDocSaving = null, draftDocAgain = false;
+// Un brouillon déjà enregistré se tient à jour tout seul pendant la saisie
+function scheduleDraftDocSave() {
+  if (!S.draft || !S.draft.draftId) return;
+  clearTimeout(draftDocTimer);
+  draftDocTimer = setTimeout(() => { saveDraftDocNow(); }, 1500);
+}
+// create : enregistre aussi une facture en cours qui n'est pas encore un brouillon
+function saveDraftDocNow(create) {
+  clearTimeout(draftDocTimer);
+  if (draftDocSaving) { draftDocAgain = true; return draftDocSaving; }
+  const d = S.draft;
+  if (!d || d.pristine || !canWrite()) return Promise.resolve(false);
+  if (!d.draftId && !create) return Promise.resolve(false);
+  const nowIso = new Date().toISOString();
+  if (!d.draftId) d.draftId = 'd-' + uid();
+  if (!d.savedAt) d.savedAt = nowIso;
+  const body = draftBody(d, d.draftId, d.savedAt, nowIso);
+  flushDraft();
+  draftDocSaving = write(() => S.db.doc('drafts/' + body.id).set(body))
+    .then(() => true)
+    .catch(e => { toast(dbMsg(e)); return false; })
+    .finally(() => {
+      draftDocSaving = null;
+      if (draftDocAgain) { draftDocAgain = false; if (S.draft && S.draft.draftId) saveDraftDocNow(); }
+    });
+  return draftDocSaving;
+}
+// « Enregistrer en brouillon » : la facture est gardée sans numéro, l'éditeur repart sur une nouvelle
+async function saveAsDraft() {
+  if (!canWrite()) { toast(S.readOnly ? 'Accès en lecture seule.' : 'Enregistrement impossible : le stockage n’est pas disponible.'); return; }
+  if (!S.draft || S.draft.pristine) { toast('Rien à enregistrer pour l’instant : commence par le client ou une prestation.'); return; }
+  await Promise.resolve(draftDocSaving);
+  saveDraftClientNow();
+  if (!(await saveDraftDocNow(true))) return;
+  closeSheet();
+  S.draft = newDraft();
+  LS.set(DRAFT_KEY, S.draft);
+  go('factures');
+  toast('Brouillon enregistré : tu le retrouves en tête des factures');
+}
+// Met de côté la facture en cours : brouillon tenu à jour, ou nouveau brouillon si elle a du contenu
+async function parkDraft() {
+  const d = S.draft;
+  if (!d || d.pristine) return false;
+  await Promise.resolve(draftDocSaving);
+  if (d !== S.draft) return false;
+  saveDraftClientNow();
+  const wasNew = !d.draftId;
+  return (await saveDraftDocNow(true)) && wasNew;
+}
+// « Nouvelle facture » : la facture en cours part dans les brouillons, on en commence une vierge
+async function startNewInvoice() {
+  const parked = await parkDraft();
+  clearTimeout(draftDocTimer);
+  S.draft = newDraft();
+  LS.set(DRAFT_KEY, S.draft);
+  go('nouvelle');
+  if (parked) toast('La facture en cours a été mise de côté dans les brouillons');
+}
+async function resumeDraft(id) {
+  const entry = S.drafts.find(x => x.id === id); if (!entry) return;
+  if (S.draft && S.draft.draftId !== id && await parkDraft()) toast('La facture en cours a été mise de côté dans les brouillons');
+  clearTimeout(draftDocTimer);
+  S.draft = clone(entry.draft);
+  S.draft.draftId = id;
+  freshenDraftDates();
+  LS.set(DRAFT_KEY, S.draft);
+  closeSheet();
+  go('nouvelle');
+}
+function whenText(iso) {
+  const d = new Date(iso); if (isNaN(d)) return '';
+  return K.fmtDate(K.todayISO(d)) + ' à ' + String(d.getHours()).padStart(2, '0') + ' h ' + String(d.getMinutes()).padStart(2, '0');
+}
+function openDraftSheet(id) {
+  const entry = S.drafts.find(x => x.id === id); if (!entry) return;
+  const inv = draftToInvoice(entry.draft);
+  openSheet(sheetHead('Brouillon', esc(inv.client.name || 'Client à indiquer') + ' · ' + esc(K.fmtMoney(inv.totals.ttc))) +
+    '<p class="hint" style="margin:0 0 12px">Pas encore de numéro : il sera attribué à la validation définitive, à la suite des autres factures. Un brouillon se modifie et se supprime librement.' +
+    (entry.updatedAt ? ' Dernière modification le ' + esc(whenText(entry.updatedAt)) + '.' : '') + '</p>' +
+    '<div class="detail-actions"><button type="button" class="btn primary" data-act="draft-resume" data-id="' + esc(id) + '">' + ic('edit') + 'Reprendre la saisie</button>' +
+    '<button type="button" class="btn danger" data-act="draft-del" data-id="' + esc(id) + '">' + ic('trash') + 'Supprimer le brouillon</button></div>' +
+    paperHTML(inv, { draft: true, nextNumber: 'attribué à la validation' }));
+}
+function askDeleteDraft(id) {
+  openSheet(sheetHead('Supprimer ce brouillon ?', 'Il n’a pas encore de numéro : le supprimer ne laisse aucun trou dans la numérotation.') +
+    '<div class="btn-row"><button type="button" class="btn" data-act="close">Annuler</button><button type="button" class="btn primary" style="flex:1;background:var(--bad);border-color:var(--bad)" data-act="draft-del-ok" data-id="' + esc(id) + '">' + ic('trash') + 'Supprimer le brouillon</button></div>');
+}
+async function deleteDraftDoc(id) {
+  if (S.draft && S.draft.draftId === id) {          // c'est la facture ouverte dans l'éditeur : on repart à neuf
+    clearTimeout(draftDocTimer);
+    S.draft = newDraft(); LS.set(DRAFT_KEY, S.draft);
+    if (S.view === 'nouvelle') renderEditor();
+  }
+  await Promise.resolve(draftDocSaving);
+  await write(() => S.db.doc('drafts/' + id).delete());
+}
+function draftsHTML() {
+  if (!S.drafts.length) return '';
+  return '<section class="drafts" id="drafts-block" aria-label="Brouillons"><div class="drafts-h"><h2>Brouillons <i>' + S.drafts.length + '</i></h2><p>Sans numéro : il est attribué à la validation définitive</p></div><div class="rows">' +
+    S.drafts.map(e => {
+      const inv = draftToInvoice(e.draft);
+      return '<button type="button" class="row" data-s="draft" data-act="draft-open" data-id="' + esc(e.id) + '"><span class="who">' + esc(inv.client.name || 'Client à indiquer') + '</span><span class="amt">' + K.fmtMoney(inv.totals.ttc) + '</span>' +
+        '<span class="meta">' + (e.updatedAt ? 'Modifié le ' + esc(whenText(e.updatedAt)) : 'Brouillon') + '</span><span class="st"><span class="pill s-draft">Brouillon</span></span></button>';
+    }).join('') + '</div></section>';
 }
 function dueOf(d) {
   if (d.term === 'reception') return d.issueDate;
@@ -2214,6 +2366,20 @@ async function connect() {
     db.doc('config/logo').onSnapshot(snap => {
       S.logoDoc = snap.exists ? snap.data() : null; mark('logo', snap.metadata); renderAll();
     }, onErr);
+    db.collection('drafts').onSnapshot(qs => {
+      S.drafts = qs.docs.map(x => cleanDraftDoc(Object.assign({}, x.data(), { id: x.id }))).filter(Boolean)
+        .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+      S.got.drafts = true;
+      // Le brouillon ouvert ici a été validé ou supprimé sur un autre appareil : on ne le recrée pas
+      const d = S.draft;
+      if (d && d.draftId && !draftDocSaving && qs.metadata && qs.metadata.fromCache === false && !S.drafts.some(x => x.id === d.draftId)) {
+        clearTimeout(draftDocTimer);
+        S.draft = newDraft(); LS.set(DRAFT_KEY, S.draft);
+        if (S.view === 'nouvelle') renderEditor();
+        toast('Ce brouillon a été validé ou supprimé sur un autre appareil.');
+      }
+      renderAll();
+    }, onErr);
     db.collection('invoices').onSnapshot(qs => {
       S.invoices = qs.docs.map(d => d.data()).filter(x => x && x.number && x.series)
         .sort((a, b) => (b.issueDate || '').localeCompare(a.issueDate || '') || (b.seq || 0) - (a.seq || 0));
@@ -2300,7 +2466,7 @@ function renderTicket(justValidated) {
   $('#tk-seq').innerHTML = S.got.invoices || !S.db
     ? '<span class="z">' + lead + '</span>' + esc(seqStr.slice(lead.length))
     : '…';
-  $('#tk-eyebrow').textContent = justValidated ? 'Validée · numéro suivant prêt' : 'Brouillon · prochain numéro';
+  $('#tk-eyebrow').textContent = justValidated ? 'Validée · numéro suivant prêt' : (d.draftId ? 'Brouillon enregistré · prochain numéro' : 'Nouvelle facture · prochain numéro');
 }
 
 /* =====================================================================
@@ -2428,6 +2594,7 @@ function refreshPristineDraft() {
 function onDraftChanged(structural) {
   S.draft.pristine = false;
   saveDraftLocal();
+  scheduleDraftDocSave(); // brouillon déjà enregistré : il se tient à jour tout seul
   if (structural) renderEditor(); else renderPreview();
   renderTicket();
 }
@@ -2475,13 +2642,15 @@ function openValidate() {
   const row = x => '<li><span class="dot ' + (x.ok ? 'ok' : (x.level === 'block' ? 'bad' : 'warn')) + '" style="width:20px;height:20px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:12px;font-weight:700;flex:none;margin-top:1px">' + (x.ok ? '✓' : (x.level === 'block' ? '✕' : '!')) + '</span><div>' + esc(x.label) +
     (!x.ok && x.help ? '<small>' + esc(x.help) + '</small>' : '') + (!x.ok && x.fix ? '<small><button type="button" class="linklike" data-act="fix" data-v="' + x.fix + '">Compléter Ma structure</button></small>' : '') + '</div></li>';
   const sorted = list.slice().sort((a, b) => (a.ok - b.ok) || ((a.level === 'block' ? 0 : 1) - (b.level === 'block' ? 0 : 1)));
-  openSheet(sheetHead(blocking.length ? 'Il manque quelques mentions' : 'Prête à être validée', blocking.length
-    ? 'Une facture doit comporter toutes les mentions obligatoires. Complète les points en rouge.'
-    : 'La facture prendra le numéro <b>' + esc(info.number) + '</b> pour un total de <b>' + esc(K.fmtMoney(inv.totals.ttc)) + '</b>.') +
+  const draftBtn = '<button type="button" class="btn" data-act="draft-save">' + ic('file') + 'Enregistrer en brouillon</button>';
+  // Deux choix : brouillon (sans numéro, modifiable) ou définitive (numéro suivant, plus jamais modifiable)
+  openSheet(sheetHead(blocking.length ? 'Il manque quelques mentions' : 'Enregistrer la facture', blocking.length
+    ? 'Pour la valider, complète les points en rouge. Tu peux aussi la garder en brouillon et la finir plus tard.'
+    : 'Garde-la en <b>brouillon</b> (sans numéro, modifiable), ou valide-la <b>définitivement</b> : elle prendra le numéro <b>' + esc(info.number) + '</b> pour un total de <b>' + esc(K.fmtMoney(inv.totals.ttc)) + '</b>.') +
     '<ul class="checklist">' + sorted.map(row).join('') + '</ul>' +
-    (blocking.length ? '<button type="button" class="btn block" data-act="close">Revenir à la facture</button>'
-      : '<p class="hint" style="margin:0 0 12px">' + ic('lock').replace('class="i"', 'class="i" style="width:15px;height:15px;vertical-align:-3px"') + ' Après validation, la facture ne se modifie plus. En cas d’erreur, tu pourras l’annuler par un avoir.' + (warns.length ? ' Les points en orange sont conseillés mais ne bloquent pas.' : '') + '</p>' +
-      '<div class="btn-row"><button type="button" class="btn" data-act="close">Modifier encore</button><button type="button" class="btn primary" style="flex:1" data-act="confirm-validate" autofocus>' + ic('check') + 'Valider ' + esc(info.number) + '</button></div>'));
+    (blocking.length ? '<div class="btn-row"><button type="button" class="btn" data-act="close">Revenir à la facture</button>' + draftBtn + '</div>'
+      : '<p class="hint" style="margin:0 0 12px">' + ic('lock').replace('class="i"', 'class="i" style="width:15px;height:15px;vertical-align:-3px"') + ' Une facture validée ne se modifie plus et ne se supprime pas : en cas d’erreur, on l’annule par un avoir. Le numéro est attribué automatiquement, à la suite du précédent.' + (warns.length ? ' Les points en orange sont conseillés mais ne bloquent pas.' : '') + '</p>' +
+      '<div class="btn-row">' + draftBtn + '<button type="button" class="btn primary" style="flex:1" data-act="confirm-validate" autofocus>' + ic('lock') + 'Valider définitivement ' + esc(info.number) + '</button></div>'));
 }
 async function doValidate(btn) {
   if (S.busy) return;
@@ -2490,7 +2659,9 @@ async function doValidate(btn) {
   try {
     const base = draftToInvoice(d);
     const nowIso = new Date().toISOString();
+    const fromDraft = d.draftId;     // brouillon enregistré d'où vient cette facture : retiré après validation
     clearTimeout(draftClientTimer); // la fiche client est écrite ci-dessous, avec la facture
+    clearTimeout(draftDocTimer);
     let clientId = d.clientId;
     if (d.saveClient && !clientId) clientId = 'c-' + uid();
     const inv = await write(() => claimNumber('invoice', d.issueDate, info => Object.assign({}, base, info, {
@@ -2504,6 +2675,10 @@ async function doValidate(btn) {
     }
     S.draft = newDraft();
     LS.set(DRAFT_KEY, S.draft);
+    if (fromDraft) {
+      Promise.resolve(draftDocSaving).then(() => write(() => S.db.doc('drafts/' + fromDraft).delete()))
+        .catch(() => toast('Le brouillon d’origine n’a pas pu être retiré : supprime-le dans Factures.'));
+    }
     closeSheet();
     window.scrollTo({ top: 0, behavior: 'smooth' });
     // « Poum » : tampon VALIDÉE sur l'ancien numéro, puis bascule vers le suivant
@@ -2639,7 +2814,7 @@ function renderList() {
   if (S.db && !S.got.invoices) { body.innerHTML = '<div class="card empty">Chargement de tes factures…</div>'; return; }
   const ready = !!(T(st.firstName) && T(st.lastName) && K.validSiret(st.siret) && T(st.address.line1));
   if (!S.invoices.length) {
-    body.innerHTML = transferNoticeHTML() + installNoticeHTML() + '<div class="card welcome"><img src="' + esc(logoSrc()) + '" alt="FAN’APA"><h2>Bienvenue dans tes factures</h2>' +
+    body.innerHTML = transferNoticeHTML() + installNoticeHTML() + draftsHTML() + '<div class="card welcome"><img src="' + esc(logoSrc()) + '" alt="FAN’APA"><h2>Bienvenue dans tes factures</h2>' +
       '<ol><li class="' + (ready ? 'done' : '') + '"><div><b>Renseigne ta structure</b><span>Nom, adresse, SIRET, IBAN, assurance : 2 minutes, une seule fois.</span></div><button type="button" class="btn small" data-go="structure">' + (ready ? 'Revoir' : 'Commencer') + '</button></li>' +
       '<li><div><b>Crée ta première facture</b><span>Elle portera le numéro ' + esc(nextInfo('invoice', K.todayISO()).number) + ', puis la numérotation suit toute seule.</span></div><button type="button" class="btn small primary" data-go="nouvelle">Créer</button></li>' +
       '<li><div><b>Envoie-la en PDF</b><span>Message pré-rempli pour ton client, PDF verrouillé contre la modification.</span></div></li></ol></div>';
@@ -2661,7 +2836,7 @@ function renderList() {
   const rows = yi.filter(i => S.filter === 'all' || statusOf(i) === S.filter)
     .filter(i => !q || (i.number + ' ' + (i.client && i.client.name) + ' ' + (i.lines || []).map(l => l.label).join(' ')).toLowerCase().includes(q));
   $('#list-sub').textContent = yi.length + ' document' + (yi.length > 1 ? 's' : '') + ' en ' + S.year;
-  body.innerHTML = installNoticeHTML() + backupNoticeHTML() +
+  body.innerHTML = installNoticeHTML() + backupNoticeHTML() + draftsHTML() +
     '<div class="kpis">' +
     '<div class="kpi accent"><span>Facturé en ' + S.year + '</span><b class="num">' + K.fmtMoney(billed) + '</b><small>avoirs déduits</small></div>' +
     '<div class="kpi"><span>Encaissé en ' + S.year + '</span><b class="num">' + K.fmtMoney(cashed) + '</b><small>à déclarer à l’Urssaf</small></div>' +
@@ -2819,7 +2994,8 @@ function cleanLogo(l) {
 }
 async function exportBackup() {
   const exportedAt = new Date().toISOString();
-  const data = { app: 'fanapa-factures', version: 2, exportedAt, settings: S.settingsRaw, logo: cleanLogo(S.logoDoc), clients: S.clients, invoices: S.invoices };
+  const data = { app: 'fanapa-factures', version: 2, exportedAt, settings: S.settingsRaw, logo: cleanLogo(S.logoDoc), clients: S.clients, invoices: S.invoices,
+    drafts: S.drafts.map(e => draftBody(e.draft, e.id, e.draft.savedAt || e.updatedAt || exportedAt, e.updatedAt || exportedAt)) };
   const ok = await saveFile('Sauvegarde-FANAPA_' + K.todayISO() + '.json', JSON.stringify(data, null, 2));
   if (!ok) return;
   LS.set(BACKUP_KEY, { at: exportedAt, count: S.invoices.length });
@@ -2845,11 +3021,13 @@ async function onBackupFile(file) {
   const clients = (Array.isArray(data.clients) ? data.clients : []).filter(c => c && ID_RE.test(String(c.id || '')) && c.name && !haveC.has(c.id));
   const settingsIn = data.settings && typeof data.settings === 'object' && !Array.isArray(data.settings) ? data.settings : null;
   const logoIn = cleanLogo(data.logo);
-  pendingImport = { invoices, clients, settings: settingsIn, logo: logoIn, exportedAt: typeof data.exportedAt === 'string' ? data.exportedAt : '' };
+  const haveD = new Set(S.drafts.map(e => e.id));
+  const drafts = (Array.isArray(data.drafts) ? data.drafts : []).map(cleanDraftDoc).filter(e => e && !haveD.has(e.id));
+  pendingImport = { invoices, clients, drafts, settings: settingsIn, logo: logoIn, exportedAt: typeof data.exportedAt === 'string' ? data.exportedAt : '' };
   const when = K.fmtDate(String(data.exportedAt || '').slice(0, 10));
   openSheet(sheetHead('Importer cette sauvegarde ?', when ? 'Sauvegarde exportée le ' + esc(when) : '') +
     '<ul class="checklist"><li><div>' + invoices.length + ' facture(s) ou avoir(s) à ajouter' + (skipped ? '<small>' + skipped + ' déjà présent(s) ou illisible(s) : ignoré(s)</small>' : '') + '</div></li>' +
-    '<li><div>' + clients.length + ' client(s) à ajouter</div></li></ul>' +
+    '<li><div>' + clients.length + ' client(s) à ajouter</div></li>' + (drafts.length ? '<li><div>' + drafts.length + ' brouillon(s) à ajouter</div></li>' : '') + '</ul>' +
     (settingsIn ? '<label class="check" style="margin-bottom:14px"><input type="checkbox" id="imp-settings"' + (S.settingsRaw ? '' : ' checked') + '> Remplacer aussi « Ma structure »' + (logoIn ? ' et le logo' : '') + ' par ceux de la sauvegarde</label>' : '') +
     '<p class="hint" style="margin:0 0 12px">Les factures déjà présentes ne sont jamais modifiées.</p>' +
     '<div class="btn-row"><button type="button" class="btn" data-act="close">Annuler</button><button type="button" class="btn primary" style="flex:1" data-act="import-ok">' + ic('up') + 'Importer</button></div>');
@@ -2861,6 +3039,8 @@ async function doImport(btn) {
   try {
     for (const inv of p.invoices) { await write(() => S.db.doc('invoices/' + inv.number).set(inv)); n++; }
     for (const c of p.clients) { await write(() => S.db.doc('clients/' + c.id).set(c)); }
+    const nowIso = new Date().toISOString();
+    for (const e of p.drafts || []) { await write(() => S.db.doc('drafts/' + e.id).set(draftBody(e.draft, e.id, e.draft.savedAt || nowIso, e.updatedAt || nowIso))); }
     const box = $('#imp-settings');
     if (p.settings && box && box.checked) {
       await write(() => S.db.doc('config/settings').set(p.settings));
@@ -3038,11 +3218,14 @@ function renderSettings(mode) {
     '<div class="card"><div class="card-h"><span class="step">4</span><div><h2>Assurance RC professionnelle</h2><p>Obligatoire pour encadrer des activités physiques contre rémunération</p></div></div><div class="grid">' +
     '<div class="grid g2">' + sf('Assureur', 'insurance.insurer') + sf('N° de contrat', 'insurance.policy') + '</div>' + sf('Couverture géographique', 'insurance.coverage') + '</div></div>' +
 
-    '<div class="card"><div class="card-h"><span class="step">5</span><div><h2>Numérotation</h2><p>Continue, sans trou ni doublon, une série par an</p></div></div>' +
+    '<div class="card" id="numbering-card"><div class="card-h"><span class="step">5</span><div><h2>Numérotation</h2><p>Automatique : sans trou, sans doublon, une série par an</p></div></div>' +
     '<div style="margin-bottom:12px"><span class="next-preview" id="next-prev">' + esc(next.number) + ' <small>prochaine facture</small></span></div>' +
-    '<div class="grid g3">' + sf('Préfixe factures', 'numbering.prefix', 'type="text" maxlength="6" autocapitalize="characters"') + sf('Préfixe avoirs', 'numbering.creditPrefix', 'type="text" maxlength="6" autocapitalize="characters"') +
-    field('Démarrer à', '<input data-s="numbering.start" type="text" inputmode="numeric" value="' + esc(Math.max(Number(st.numbering.startYear) === Y ? Number(st.numbering.start) || 1 : 1, 1)) + '">') + '</div>' +
-    '<p class="hint">Tu as déjà émis des factures cette année avec un autre outil ? Indique le numéro suivant dans « Démarrer à » (au minimum ' + maxSeq + '). Change le préfixe seulement en début d’année.</p></div>' +
+    (numberingLocked()
+      // Dès la première facture, plus aucun réglage : le numéro suivant est toujours le bon
+      ? '<p class="persist" style="margin:0"><span class="dot ok">✓</span><span><b>Verrouillée.</b> Chaque facture validée prend automatiquement le numéro suivant (' + esc(K.cleanPrefix(st.numbering.prefix, 'FA')) + '-' + Y + '-001, puis 002, 003…) : impossible de choisir ou de sauter un numéro. Pour annuler une facture, on fait un avoir (série ' + esc(K.cleanPrefix(st.numbering.creditPrefix, 'AV')) + ').</span></p></div>'
+      : '<div class="grid g3">' + sf('Préfixe factures', 'numbering.prefix', 'type="text" maxlength="6" autocapitalize="characters"') + sf('Préfixe avoirs', 'numbering.creditPrefix', 'type="text" maxlength="6" autocapitalize="characters"') +
+        field('Démarrer à', '<input data-s="numbering.start" type="text" inputmode="numeric" value="' + esc(Math.max(Number(st.numbering.startYear) === Y ? Number(st.numbering.start) || 1 : 1, 1)) + '">') + '</div>' +
+        '<p class="hint">Tu as déjà émis des factures cette année avec un autre outil ? Indique le numéro suivant dans « Démarrer à » (au minimum ' + maxSeq + '). <b>Ces réglages se verrouillent dès la première facture validée</b> : ensuite, la numérotation suit toute seule.</p></div>') +
 
     '<div class="card"><div class="card-h"><span class="step">6</span><div><h2>Paiement par défaut</h2><p>Pré-rempli sur chaque nouvelle facture</p></div></div><div class="grid">' +
     '<div class="field"><span>Échéance</span><div class="chips">' + [['reception', 'À réception'], ['15', '15 jours'], ['30', '30 jours']].map(t => '<button type="button" class="chip" data-act="def-term" data-v="' + t[0] + '" aria-pressed="' + (st.defaults.term === t[0]) + '">' + t[1] + '</button>').join('') + '</div></div>' +
@@ -3100,18 +3283,26 @@ function settingsChanged(rerender) {
   else updateSettingsHints();
   scheduleSettingsSave();
 }
+/* Numérotation verrouillée dès qu'une facture existe : ni « Démarrer à » ni préfixe ne sont
+   modifiables, sinon on pourrait sauter un numéro (trou interdit) ou ouvrir une autre série. */
+function numberingLocked() { return S.invoices.length > 0; }
 // Version enregistrée de Ma structure : la copie de travail (S.editSettings) reste telle quelle
 function normalizeSettings(src) {
   const st = clone(src);
   st.siret = K.digits(st.siret);
   st.iban = String(st.iban || '').replace(/\s/g, '').toUpperCase();
   st.bic = String(st.bic || '').replace(/\s/g, '').toUpperCase();
-  st.numbering.prefix = K.cleanPrefix(st.numbering.prefix, 'FA');
-  st.numbering.creditPrefix = K.cleanPrefix(st.numbering.creditPrefix, 'AV');
-  const minStart = K.nextSeq(S.invoices, 'invoice', Object.assign({}, st.numbering, { start: 1 }), nowYear()).seq;
-  st.numbering.start = Math.max(Math.floor(num(st.numbering.start)) || 1, 1);
-  if (st.numbering.start < minStart) st.numbering.start = minStart;
-  st.numbering.startYear = nowYear();
+  if (numberingLocked()) {
+    // Numérotation verrouillée : on garde exactement celle qui est enregistrée, quoi qu'il arrive
+    st.numbering = clone(settings().numbering);
+  } else {
+    st.numbering.prefix = K.cleanPrefix(st.numbering.prefix, 'FA');
+    st.numbering.creditPrefix = K.cleanPrefix(st.numbering.creditPrefix, 'AV');
+    const minStart = K.nextSeq(S.invoices, 'invoice', Object.assign({}, st.numbering, { start: 1 }), nowYear()).seq;
+    st.numbering.start = Math.max(Math.floor(num(st.numbering.start)) || 1, 1);
+    if (st.numbering.start < minStart) st.numbering.start = minStart;
+    st.numbering.startYear = nowYear();
+  }
   st.vat.rate = num(st.vat.rate) || 20;
   st.catalog = st.catalog.filter(x => (x.label || '').trim()).map(x => ({ id: x.id || uid(), label: x.label.trim(), detail: (x.detail || '').trim(), unit: Math.round(Number(x.unit) || 0) }));
   st.updatedAt = new Date().toISOString();
@@ -3221,10 +3412,16 @@ document.addEventListener('click', e => {
     case 'client-clear': saveDraftClientNow(); d.clientId = null; d.clientNew = false; d.client = blankClient(); onDraftChanged(true); break;
     case 'preview': {
       const info = nextInfo('invoice', d.issueDate);
-      openSheet(sheetHead('Aperçu', 'Mise en page du PDF · le numéro ' + esc(info.number) + ' sera attribué à la validation') + '<div id="pv-sheet"></div><div class="btn-row" style="margin-top:14px"><button type="button" class="btn" data-act="close">Continuer à modifier</button><button type="button" class="btn primary" style="flex:1" data-act="validate">' + ic('lock') + 'Valider</button></div>');
+      openSheet(sheetHead('Aperçu', 'Mise en page du PDF · le numéro ' + esc(info.number) + ' sera attribué à la validation') + '<div id="pv-sheet"></div><div class="btn-row" style="margin-top:14px"><button type="button" class="btn" data-act="close">Continuer à modifier</button><button type="button" class="btn primary" style="flex:1" data-act="validate">' + ic('check') + 'Enregistrer…</button></div>');
       renderPreview(); break;
     }
     case 'validate': closeSheet(); openValidate(); break;
+    case 'draft-save': saveAsDraft(); break;
+    case 'new-invoice': startNewInvoice(); break;
+    case 'draft-open': openDraftSheet(a.dataset.id); break;
+    case 'draft-resume': resumeDraft(a.dataset.id); break;
+    case 'draft-del': askDeleteDraft(a.dataset.id); break;
+    case 'draft-del-ok': deleteDraftDoc(a.dataset.id).then(() => { closeSheet(); toast('Brouillon supprimé'); }).catch(err => toast(dbMsg(err))); break;
     case 'confirm-validate': doValidate(a); break;
     case 'fix': closeSheet(); go(v); break;
     case 'send': closeSheet(); openSend(n); break;
@@ -3382,6 +3579,7 @@ function flushAll() {
   if (S.settingsDirty) saveSettingsNow();
   if (clientEditDirty) saveClientEditNow();
   saveDraftClientNow();
+  if (S.draft && S.draft.draftId) saveDraftDocNow(); // brouillon enregistré : dernières saisies
 }
 window.addEventListener('pagehide', flushAll);
 // Avertissement avant de fermer : version autonome seulement (le cadre claude.ai ne l'affiche pas)
