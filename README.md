@@ -27,6 +27,19 @@ l'ouvrir, connecté·e à ton compte Claude).
 - **Ne supprime jamais cette page** : ses données seraient effacées avec elle. Exporte de temps en
   temps une sauvegarde (Ma structure → Sauvegarde).
 
+**En mode application sur l'iPhone (icône sur l'écran d'accueil)**
+
+1. Ouvre le lien dans **Safari**, connecte-toi à Claude si besoin et attends que l'appli s'affiche.
+2. Touche **Partager** (carré avec une flèche vers le haut ; sur iOS 26, touche d'abord **⋯**).
+3. Choisis **Sur l'écran d'accueil**, renomme en « Factures », laisse **Ouvrir en tant qu'app web**
+   activé, puis touche **Ajouter**.
+4. Au premier lancement, l'icône peut redemander la connexion à Claude : elle a sa propre session.
+
+Si l'icône ouvre l'accueil de Claude au lieu des factures (iOS reprend parfois l'adresse de départ
+du site), supprime-la (aucune facture n'est perdue, elles sont en ligne) et refais l'étape 3 en
+**désactivant** « Ouvrir en tant qu'app web » : l'icône ouvrira alors directement la page des
+factures, dans Safari.
+
 Mettre à jour la page après une modification : `npm run build`, puis republier
 `dist/artifact/index.html` à la même adresse (voir CLAUDE.md).
 
@@ -58,7 +71,7 @@ Les en-têtes de sécurité et de mise à jour (`app/_headers`) s'appliquent dan
 1. Ouvre l'adresse du site dans **Safari**.
 2. Touche le bouton **Partager** (carré avec une flèche vers le haut ; sur iOS 26, il est dans le
    menu **⋯** en bas à droite).
-3. Choisis **Sur l'écran d'accueil** (fais défiler si besoin), laisse « Ouvrir comme app web »
+3. Choisis **Sur l'écran d'accueil** (fais défiler si besoin), laisse « Ouvrir en tant qu'app web »
    activé, puis touche **Ajouter**.
 4. Ouvre ensuite toujours l'appli depuis son icône : elle démarre instantanément, même sans réseau.
 
