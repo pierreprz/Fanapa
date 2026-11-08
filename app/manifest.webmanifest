@@ -2,7 +2,7 @@
   "id": "./",
   "name": "Factures FAN'APA",
   "short_name": "FAN'APA",
-  "description": "Facturation FAN'APA – Activité Physique Adaptée & Autonomie : factures conformes, numérotation continue, PDF verrouillé, envoi par e-mail.",
+  "description": "Facturation FAN'APA – Activité Physique Adaptée : factures conformes, numérotation continue, PDF verrouillé, envoi par e-mail.",
   "lang": "fr",
   "dir": "ltr",
   "start_url": "./",

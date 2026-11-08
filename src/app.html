@@ -654,7 +654,7 @@ const BACKUP_KEY = 'fanapa.backup.v1';          // dernière sauvegarde exporté
 const BACKUP_SNOOZE = 'fanapa.backup.snooze';
 const INSTALL_SNOOZE = 'fanapa.install.snooze';
 const DEFAULT_SETTINGS = {
-  firstName: '', lastName: '', tradeName: 'FAN’APA', tagline: 'Activité Physique Adaptée & Autonomie', qualification: '',
+  firstName: '', lastName: '', tradeName: 'FAN’APA', tagline: 'Activité Physique Adaptée', qualification: '',
   address: { line1: '', line2: '', zip: '', city: '' },
   siret: '', email: '', phone: '', iban: '', bic: '', vatNumber: '',
   vat: { mode: 'franchise', rate: 20, exemptText: 'Exonération de TVA, article 261, 4, 4° b du CGI', debits: false },
@@ -682,6 +682,17 @@ const S = {
   filter: 'all', q: '', year: NOW_YEAR, cq: '', busy: false
 };
 const settings = () => deepMerge(DEFAULT_SETTINGS, S.settingsRaw || {});
+/* Réglages enregistrés avant la version 2 : l'ancien slogan par défaut « … & Autonomie » est remplacé
+   une fois pour toutes (demande de FAN'APA). Un slogan modifié à la main n'est jamais touché, et
+   celui qui serait retapé plus tard reste tel quel (la version 2 est enregistrée). */
+const SETTINGS_VERSION = 2;
+const OLD_TAGLINE = 'Activité Physique Adaptée & Autonomie';
+function migrateSettings(raw) {
+  if (!raw || (Number(raw.settingsVersion) || 0) >= SETTINGS_VERSION) return null;
+  const st = Object.assign({}, raw, { settingsVersion: SETTINGS_VERSION, updatedAt: new Date().toISOString() });
+  if (T(st.tagline) === OLD_TAGLINE) st.tagline = DEFAULT_SETTINGS.tagline;
+  return st;
+}
 
 /* ---------- Brouillon ---------- */
 function blankClient() { return { type: 'particulier', name: '', contact: '', address: { line1: '', line2: '', zip: '', city: '' }, email: '', siren: '' }; }
@@ -1414,6 +1425,12 @@ async function connect() {
   try {
     db.doc('config/settings').onSnapshot(snap => {
       S.settingsRaw = snap.exists ? snap.data() : null; mark('settings', snap.metadata);
+      const mig = canWrite() && !S.settingsDirty && !S.settingsSaving ? migrateSettings(S.settingsRaw) : null;
+      if (mig) {
+        S.settingsRaw = mig; S.settingsWriteId = mig.updatedAt; // notre écriture : elle revient par ce même onSnapshot
+        S.editSettings = null; // rien n'était en cours de saisie : copie de travail refaite avec le slogan corrigé
+        write(() => S.db.doc('config/settings').set(mig)).catch(() => { });
+      }
       // Notre propre enregistrement automatique : on garde la copie de travail (lignes vides
       // de prestations en cours de saisie comprises) ; un changement venu d'ailleurs la remplace.
       const own = !!(S.settingsRaw && S.settingsWriteId && S.settingsRaw.updatedAt === S.settingsWriteId);
@@ -1797,7 +1814,7 @@ function attachHintHTML(mailer, file) {
   const f = '<b>' + esc(file) + '</b>';
   if (mailer === 'mail') return 'Il reste à joindre le PDF : dans Mail, touche le texte du message, puis l’icône document dans la barre au-dessus du clavier, et choisis ' + f + '.';
   if (mailer === 'outlook') return 'Il reste à joindre le PDF : dans Outlook, touche le trombone 📎, puis choisis ' + f + ' dans Fichiers.';
-  return 'Il reste à joindre le PDF : dans Gmail, touche le trombone 📎 en haut, puis « Fichiers » (icône dossier), et choisis ' + f + ' dans « Récents ».';
+  return 'Il reste à joindre la facture (Gmail ne la joint pas tout seul à un mail déjà rempli) : touche le trombone 📎 en haut, puis « Fichiers » (icône dossier), et choisis ' + f + ' dans « Récents ».';
 }
 function renderAttachHint(mailer) {
   const el = $('#m-attach'); if (!el) return;
@@ -2454,6 +2471,8 @@ function normalizeSettings(src) {
   }
   st.vat.rate = num(st.vat.rate) || 20;
   st.catalog = st.catalog.filter(x => (x.label || '').trim()).map(x => ({ id: x.id || uid(), label: x.label.trim(), detail: (x.detail || '').trim(), unit: Math.round(Number(x.unit) || 0) }));
+  if ((Number(st.settingsVersion) || 0) < SETTINGS_VERSION && T(st.tagline) === OLD_TAGLINE) st.tagline = DEFAULT_SETTINGS.tagline;
+  st.settingsVersion = SETTINGS_VERSION;
   st.updatedAt = new Date().toISOString();
   return st;
 }

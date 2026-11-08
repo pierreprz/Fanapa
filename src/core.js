@@ -238,10 +238,14 @@
       if (methods.includes('virement') && s.iban) reglement += ' (IBAN : ' + fmtIban(s.iban) + ')';
       reglement += '.';
     }
+    /* Signature : l'expéditeur tel qu'il se présente aujourd'hui (Ma structure), sinon tel que sur la
+       facture. Le mail n'est pas la facture : elle garde son instantané, la signature peut évoluer
+       (nouveau slogan, nouveau numéro de téléphone pour une relance). */
+    const me = settings && (String(settings.firstName || '').trim() || String(settings.lastName || '').trim()) ? settings : s;
     const sig = [
-      [String(s.firstName || '').trim(), upper(s.lastName)].filter(Boolean).join(' '),
-      [s.tradeName, s.tagline].filter(Boolean).join(' – '),
-      fmtPhone(s.phone)
+      [String(me.firstName || '').trim(), upper(me.lastName)].filter(Boolean).join(' '),
+      [me.tradeName, me.tagline].filter(Boolean).join(' – '),
+      fmtPhone(me.phone)
     ].filter(Boolean).join('\n');
     const c = inv.client || {};
     const isCredit = inv.kind === 'credit';
@@ -252,9 +256,9 @@
       echeance: isCredit ? '' : (inv.term === 'reception' ? 'à réception' : 'au plus tard le ' + fmtDate(inv.dueDate)),
       client: c.type === 'pro' ? (c.contact || c.name || '') : (c.name || ''),
       structure: s.tradeName || sellerName(s),
-      prenom: String(s.firstName || '').trim(),
-      nom: upper(s.lastName),
-      telephone: fmtPhone(s.phone),
+      prenom: String(me.firstName || '').trim(),
+      nom: upper(me.lastName),
+      telephone: fmtPhone(me.phone),
       iban: fmtIban(s.iban),
       reglement: reglement,
       signature: sig

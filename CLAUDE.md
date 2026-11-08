@@ -72,6 +72,11 @@ tutoiement ; tout ce que voit le client final (PDF, e-mails, relances) est au vo
   renvoie notre propre écriture (`updatedAt === S.settingsWriteId`), la copie de travail est
   conservée : sinon une ligne de prestation ajoutée puis tapée après l'enregistrement serait
   perdue. Le bouton « Enregistrer » force l'enregistrement (utile après une erreur).
+  Réglages versionnés (`settingsVersion`, `SETTINGS_VERSION` = 2) : `migrateSettings()` corrige une
+  fois, à la lecture, les réglages plus anciens et les réécrit (ancien slogan par défaut « Activité
+  Physique Adaptée & Autonomie » → « Activité Physique Adaptée ») ; `normalizeSettings()` pose la
+  version courante. Le slogan ne sert qu'à la signature des mails, qui vient de Ma structure
+  ACTUELLE (`mailFields`, repli sur l'instantané de la facture) : le mail n'est pas la facture.
 - Clients, même principe (jamais de client perdu) : la fiche « Nouveau client / Modifier » est
   écrite dès qu'elle a un nom (`scheduleClientSave()` 0,6 s, et en refermant la fiche par la
   croix, le fond ou Échap) ; « Supprimer » attend l'écriture en cours et coupe l'enregistrement

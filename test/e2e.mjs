@@ -139,6 +139,31 @@ try {
   assert.ok((await store('config/settings')).catalog.some(x => x.label === 'Atelier équilibre' && x.unit === 3000));
   step('Ma structure conservée sans toucher « Enregistrer » : en quittant l’écran, après une pause, à la réouverture');
 
+  // Ancien slogan par défaut « … & Autonomie », enregistré par une version précédente : remplacé une fois
+  assert.equal((await store('config/settings')).tagline, 'Activité Physique Adaptée');
+  const older = await store('config/settings');
+  delete older.settingsVersion;
+  older.tagline = 'Activité Physique Adaptée & Autonomie';
+  await page.evaluate(([p, v]) => new Promise((res, rej) => {
+    const rq = indexedDB.open('fanapa-factures', 1);
+    rq.onsuccess = () => {
+      const db = rq.result, tx = db.transaction('docs', 'readwrite');
+      tx.objectStore('docs').put(v, p);
+      tx.oncomplete = () => { db.close(); res(); };
+      tx.onerror = () => rej(tx.error);
+    };
+  }), ['config/settings', older]);
+  await page.reload();
+  await ready(page);
+  for (let i = 0; i < 50 && ((await store('config/settings')) || {}).settingsVersion !== 2; i++) await page.waitForTimeout(100);
+  const fixed = await store('config/settings');
+  assert.equal(fixed.tagline, 'Activité Physique Adaptée', 'slogan corrigé et enregistré');
+  assert.equal(fixed.settingsVersion, 2);
+  assert.equal(fixed.qualification, 'Enseignante en APA – STAPS', 'le reste de Ma structure est intact');
+  await page.click('.tabs [data-go="structure"]');
+  assert.equal(await page.inputValue('[data-s="tagline"]'), 'Activité Physique Adaptée');
+  step('ancien slogan « … & Autonomie » remplacé une fois pour toutes, le reste de Ma structure intact');
+
   // Facture 1 (particulier)
   await page.click('.tabs [data-go="nouvelle"]');
   assert.equal(await ticket(page), `FA-${YEAR}-001`);
@@ -349,7 +374,10 @@ try {
   assert.match(iosLinks[0].href, /&body=Bonjour%20M\.%20Paul%20Durand%2C%0D%0A%0D%0AVeuillez/, 'message avec ses retours à la ligne');
   assert.ok(iosLinks[1].href.startsWith('mailto:paul.durand@exemple.fr?subject=Facture%20FA-'), 'Mail : adresse remplie');
   assert.ok(iosLinks[2].href.startsWith('ms-outlook://compose?to=paul.durand%40exemple.fr'), 'appli Outlook');
-  assert.match(await p3.textContent('#m-attach'), /dans Gmail, touche le trombone/);
+  const gBody = decodeURIComponent(iosLinks[0].href.split('&body=')[1]);
+  assert.ok(gBody.endsWith('Camille EXEMPLE\r\nFAN’APA – Activité Physique Adaptée\r\n06 01 02 03 04'), 'signature sans « Autonomie »');
+  assert.doesNotMatch(gBody, /Autonomie/);
+  assert.match(await p3.textContent('#m-attach'), /Gmail ne la joint pas tout seul.*touche le trombone/);
   assert.ok((await p3.textContent('#m-attach')).includes(file3), 'le nom du PDF à joindre est indiqué');
   await p3.waitForTimeout(400);
   await p3.screenshot({ path: join(OUT, '10-iphone-envoi.png') });

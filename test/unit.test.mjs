@@ -56,7 +56,7 @@ test('préfixe nettoyé', () => { assert.equal(K.cleanPrefix('f a/26', 'FA'), 'F
 
 console.log('Totaux et mentions');
 const seller = {
-  firstName: 'Camille', lastName: 'Exemple', tradeName: "FAN'APA", tagline: 'Activité Physique Adaptée & Autonomie',
+  firstName: 'Camille', lastName: 'Exemple', tradeName: "FAN'APA", tagline: 'Activité Physique Adaptée',
   qualification: 'Enseignante en APA – licence STAPS APA-S',
   address: { line1: '12 rue des Granges', line2: '', zip: '25000', city: 'Besançon' },
   siret: '73282932000074', email: 'contact@fanapa.fr', phone: '0601020304',
@@ -92,6 +92,15 @@ test('e-mail pré-rempli', () => {
   assert.match(m.body, /^Bonjour Mme Jeanne Martin,/);
   assert.match(m.body, /230,00 €/);
   assert.match(m.body, /IBAN : FR76 3000/);
+});
+test('signature du mail : Ma structure actuelle (la facture garde son instantané)', () => {
+  const old = Object.assign({}, base, { seller: Object.assign({}, seller, { tagline: 'Activité Physique Adaptée & Autonomie' }) });
+  const now = { mail: {}, firstName: 'Camille', lastName: 'Exemple', tradeName: "FAN'APA", tagline: 'Activité Physique Adaptée', phone: '0611223344' };
+  const m = K.buildMail(old, now);
+  assert.match(m.body, /Camille EXEMPLE\nFAN'APA – Activité Physique Adaptée\n06 11 22 33 44$/);
+  assert.doesNotMatch(m.body, /Autonomie/);
+  assert.equal(old.seller.tagline, 'Activité Physique Adaptée & Autonomie', 'la facture n’est pas modifiée');
+  assert.match(K.buildMail(old, { mail: {} }).body, /& Autonomie/, 'sans Ma structure : signature de la facture');
 });
 test('relance courtoise ; pénalités rappelées aux professionnels à partir de la 2e', () => {
   const r1 = K.buildReminderMail(base, { mail: {} }, 1);
