@@ -7,7 +7,7 @@
      ne peut jamais remplacer l'appli.
    - Les réponses redirigées sont « nettoyées » avant d'être servies à une
      navigation (sinon Safari et Chrome refusent de les afficher). */
-const CACHE = 'fanapa-fe117bf840';
+const CACHE = 'fanapa-5f1dbf8b12';
 const ASSETS = [
   "./",
   "./manifest.webmanifest",

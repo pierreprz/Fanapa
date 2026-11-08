@@ -152,7 +152,7 @@ try {
   // Envoi : PDF + liens de messagerie
   await page.click('.sheet [data-act="send"]');
   const pdf1 = await download('[data-act="send-pdf"]');
-  assert.match(pdf1.name, /^Facture_FA-\d{4}-001_.*\.pdf$/);
+  assert.equal(pdf1.name, `Facture FA-${YEAR}-001 - FAN'APA.pdf`, 'nom de fichier lisible par le client');
   assert.ok(pdf1.size > 50000);
   const links = await page.$$eval('#mail-links a', as => as.map(a => a.href));
   assert.ok(links[0].startsWith('https://mail.google.com/') && links[1].startsWith('mailto:jeanne.martin@exemple.fr'));
@@ -340,21 +340,57 @@ try {
   await fillStructure(p3);
   await newInvoice(p3, { name: 'M. Paul Durand', line1: '8 rue Battant', email: 'paul.durand@exemple.fr', qty: 1 });
   await p3.click('.sheet [data-act="send"]');
-  await p3.waitForSelector('[data-act="share-mail"]');
-  assert.equal(await p3.textContent('#m-send-label'), 'Envoyer à paul.durand@exemple.fr', 'le bouton annonce le destinataire');
-  assert.ok((await p3.$$eval('#mail-links a', as => as.map(a => a.href)))[0].startsWith('mailto:paul.durand@exemple.fr'), 'variante Mail : adresse déjà remplie');
+  await p3.waitForSelector('#mail-links a');
+  const file3 = `Facture FA-${YEAR}-001 - FAN'APA.pdf`;
+  const iosLinks = await p3.$$eval('#mail-links a', as => as.map(a => ({ k: a.dataset.mailer, href: a.getAttribute('href'), text: a.textContent })));
+  assert.deepEqual(iosLinks.map(l => l.k), ['gmail', 'mail', 'outlook'], 'Gmail en premier');
+  assert.equal(iosLinks[0].text, 'Ouvrir Gmail');
+  assert.ok(iosLinks[0].href.startsWith('googlegmail:///co?to=paul.durand%40exemple.fr&subject=Facture%20FA-'), 'appli Gmail : nouveau mail adressé au client');
+  assert.match(iosLinks[0].href, /&body=Bonjour%20M\.%20Paul%20Durand%2C%0D%0A%0D%0AVeuillez/, 'message avec ses retours à la ligne');
+  assert.ok(iosLinks[1].href.startsWith('mailto:paul.durand@exemple.fr?subject=Facture%20FA-'), 'Mail : adresse remplie');
+  assert.ok(iosLinks[2].href.startsWith('ms-outlook://compose?to=paul.durand%40exemple.fr'), 'appli Outlook');
+  assert.match(await p3.textContent('#m-attach'), /dans Gmail, touche le trombone/);
+  assert.ok((await p3.textContent('#m-attach')).includes(file3), 'le nom du PDF à joindre est indiqué');
   await p3.waitForTimeout(400);
   await p3.screenshot({ path: join(OUT, '10-iphone-envoi.png') });
-  await p3.click('[data-act="share-mail"]');
+  await p3.$eval('#stp-mail', el => el.scrollIntoView({ block: 'center' }));
+  await p3.waitForTimeout(200);
+  await p3.screenshot({ path: join(OUT, '10b-iphone-envoi-gmail.png') });
+  // Étape « Enregistre la facture dans Fichiers » : menu de partage avec le PDF seul
+  await p3.click('#stp-pdf [data-act="send-pdf"]');
   await p3.waitForFunction(() => window.__shared.length === 1);
-  const shared = (await p3.evaluate(() => window.__shared))[0];
+  let shared = (await p3.evaluate(() => window.__shared))[0];
   assert.equal(shared.files.length, 1);
-  assert.match(shared.files[0].name, /^Facture_FA-\d{4}-001_M-Paul-Durand\.pdf$/);
+  assert.equal(shared.files[0].name, file3);
+  await p3.waitForSelector('#stp-pdf.done');
+  // La messagerie choisie est retenue (le lien lui-même n'est pas suivi dans le test)
+  await p3.evaluate(() => {
+    const a = document.querySelector('#mail-links a[data-mailer="mail"]');
+    a.addEventListener('click', e => e.preventDefault(), { once: true });
+    a.click();
+  });
+  await p3.waitForSelector('#stp-mail.done');
+  assert.match(await p3.textContent('#m-attach'), /dans Mail, touche le texte du message/);
+  // Variante en un geste : PDF joint, objet et message ; l'adresse est copiée pour être collée
+  await p3.click('#stp-mail details.alt summary');
+  assert.equal(await p3.textContent('#m-send-label'), 'Envoyer à paul.durand@exemple.fr', 'le bouton annonce le destinataire');
+  await p3.click('[data-act="share-mail"]');
+  await p3.waitForFunction(() => window.__shared.length === 2);
+  shared = (await p3.evaluate(() => window.__shared))[1];
+  assert.equal(shared.files.length, 1);
+  assert.equal(shared.files[0].name, `Facture FA-${YEAR}-001 – FAN’APA.pdf`, 'Gmail fait du nom du fichier l’objet du mail : c’est l’objet choisi');
   assert.equal(shared.files[0].type, 'application/pdf');
   assert.ok(shared.files[0].size > 50000);
   assert.match(shared.text, /^Bonjour M\. Paul Durand,/);
-  assert.match(shared.title, /^Facture FA-\d{4}-001/);
-  step('iPhone : « Envoyer à l’adresse du client » ouvre le partage avec le PDF joint, l’objet et le message ; variante Mail avec l’adresse remplie');
+  assert.match(shared.title, /^Facture FA-\d{4}-001 – FAN’APA$/);
+  await p3.click('.sheet [data-act="close"]');
+  await p3.click('.tabs [data-go="factures"]');
+  await p3.click(`.row[data-n="FA-${YEAR}-001"]`);
+  await p3.click('.sheet [data-act="send"]');
+  await p3.waitForSelector('#mail-links a');
+  assert.deepEqual(await p3.$$eval('#mail-links a', as => as.map(a => a.dataset.mailer)), ['mail', 'gmail', 'outlook'], 'messagerie préférée en premier');
+  await p3.click('.sheet [data-act="close"]');
+  step('iPhone : « Ouvrir Gmail » ouvre l’appli Gmail avec l’adresse du client, l’objet et le message mis en forme ; PDF enregistré dans Fichiers ; partage en un geste en variante');
 
   /* ================= 4. iPhone, appli installée encore vide : récupérer ce qui a été saisi dans Safari ================= */
   const ctx4 = await browser.newContext({ ...iphone, locale: 'fr-FR' });

@@ -45,14 +45,25 @@ tutoiement ; tout ce que voit le client final (PDF, e-mails, relances) est au vo
   facture en cours dans les brouillons (`parkDraft()`). Les brouillons sont dans la sauvegarde.
 - Préférences locales (localStorage, par appareil) : `fanapa.draft.v1` (brouillon),
   `fanapa.backup.v1` (date de la dernière sauvegarde exportée), `fanapa.backup.snooze`,
-  `fanapa.install.snooze`, `fanapa.transfer.snooze`, `fanapa.mail.cc` (« Me mettre en copie »).
+  `fanapa.install.snooze`, `fanapa.transfer.snooze`, `fanapa.mail.cc` (« Me mettre en copie »),
+  `fanapa.mailer` (messagerie préférée : `gmail`, `mail` ou `outlook`, son bouton passe en premier).
 - Envoi (`openSend`) : destinataire = e-mail de la facture, sinon celui de la fiche client
   (`clientEmailFor` ; l'e-mail n'est pas une mention légale, le prendre dans la fiche ne touche
   pas la facture). Une adresse tapée dans « À » est enregistrée dans la fiche si elle n'en a pas
-  (`rememberClientEmail`, jamais d'écrasement). Liens Mail / Gmail / Outlook avec `cc` si « Me
-  mettre en copie ». Sur téléphone (appli autonome), le bouton « Envoyer à … » partage le PDF,
-  l'objet et le message et copie l'adresse : la Web Share API ne permet pas de remplir le
-  destinataire. La variante « adresse déjà remplie » (mailto) oblige à joindre le PDF à la main.
+  (`rememberClientEmail`, jamais d'écrasement). Liens Gmail / Mail / Outlook (`mailLinks`) avec
+  `cc` si « Me mettre en copie », dans l'ordre de `mailerOrder()`. **iPhone / iPad** (`isIOS`) :
+  ① vérifier le mail, ② « Enregistrer la facture » dans Fichiers, ③ « Ouvrir Gmail » ouvre
+  l'APPLI Gmail (`googlegmail:///co?to=&cc=&subject=&body=`, corps en CRLF ; le lien web
+  mail.google.com n'ouvre sur iPhone que la boîte de réception), Mail = `mailto:` (messagerie par
+  défaut), Outlook = `ms-outlook://compose?…` ; puis joindre le PDF avec le trombone
+  (`attachHintHTML`, nom du fichier rappelé). Apple ne laisse pas une appli web remplir le
+  destinataire ET joindre un fichier. Variante repliée « en un seul geste » (`share-mail`,
+  appli autonome) : partage du PDF + message, adresse copiée à coller ; Gmail y prend le NOM DU
+  FICHIER comme objet (d'où `shareFileName(objet)`) et perd les retours à la ligne. Android
+  (appli autonome) : partage en premier. Ordinateur : PDF à enregistrer puis liens web.
+  Noms de PDF (`pdfName`) en caractères simples, « Facture FA-2026-005 - FAN'APA.pdf » : avec
+  un accent ou une apostrophe typographique, Chromium sous Linux sans locale UTF-8 remplace le
+  nom par « download ».
 - « Ma structure » s'enregistre toute seule (jamais de saisie perdue à la fermeture) :
   `scheduleSettingsSave()` 0,6 s après chaque saisie, `saveSettingsNow()` en quittant l'écran,
   au passage en arrière-plan et à la fermeture ; une écriture à la fois (`S.settingsSaving`).
