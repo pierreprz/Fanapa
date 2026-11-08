@@ -13,7 +13,28 @@ Appli de facturation pour FAN'APA, micro-entreprise d'activité physique adapté
 - appli installable sur le téléphone, qui fonctionne **sans réseau** et se met à jour toute seule ;
 - rappel de **sauvegarde** tant que des factures ne sont que sur l'appareil.
 
-## L'appli en ligne sur claude.ai (version actuelle)
+## Où ouvrir l'appli
+
+| Version | Adresse | Données |
+| --- | --- | --- |
+| **Appli pour iPhone** (GitHub Pages) | **https://pierreprz.github.io/Fanapa/app/** | sur le téléphone, marche sans réseau |
+| Page claude.ai | https://claude.ai/artifact/GuMWU7wDLNb8FW76ZGpfbc | en ligne, avec ton compte Claude |
+
+> **Factures dans une seule version.** Chacune a ses propres données et sa propre numérotation :
+> facturer dans les deux donnerait deux factures FA-2026-001, ce qui est interdit. Pour passer de
+> l'une à l'autre : Ma structure → Sauvegarde → Exporter dans l'ancienne, puis Importer dans la
+> nouvelle.
+
+## L'appli pour iPhone (GitHub Pages)
+
+GitHub publie la branche du dépôt (réglage Settings → Pages, depuis la racine) : la page
+https://pierreprz.github.io/Fanapa/ renvoie vers l'appli, dans `app/`. Chaque push sur la branche
+met le site à jour en une minute environ, et l'appli installée propose alors « Mettre à jour ».
+Pour l'installer sur l'iPhone, suis « Installer la version autonome sur iPhone » plus bas (l'appli
+affiche aussi les étapes elle-même). Ses factures sont enregistrées **sur le téléphone** :
+exporte une sauvegarde régulièrement (l'appli te le rappelle).
+
+## L'appli en ligne sur claude.ai
 
 **Adresse : https://claude.ai/artifact/GuMWU7wDLNb8FW76ZGpfbc** (page privée : toi seul·e peux
 l'ouvrir, connecté·e à ton compte Claude).

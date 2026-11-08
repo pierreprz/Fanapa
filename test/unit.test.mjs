@@ -131,6 +131,12 @@ test('manifeste : appli autonome, icônes présentes, raccourci « Nouvelle fact
   man.icons.forEach(i => assert.ok(existsSync(join(ROOT, 'assets', i.src)), i.src));
   assert.equal(man.shortcuts[0].url, './#nouvelle');
 });
+test('GitHub Pages : la racine du dépôt renvoie vers app/, sans traitement Jekyll', () => {
+  const idx = readFileSync(join(ROOT, 'index.html'), 'utf8');
+  assert.match(idx, /http-equiv="refresh" content="0; url=app\/"/);
+  assert.match(idx, /location\.replace\('app\/' \+ location\.hash\)/);
+  assert.ok(existsSync(join(ROOT, '.nojekyll')), '.nojekyll présent');
+});
 test('netlify.toml publie le dossier app/', () => {
   const toml = readFileSync(join(ROOT, 'netlify.toml'), 'utf8');
   assert.match(toml, /^\s*publish\s*=\s*"app"/m);

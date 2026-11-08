@@ -49,7 +49,13 @@ tutoiement ; tout ce que voit le client final (PDF, e-mails, relances) est au vo
   `_headers` (CSP, nosniff, `no-cache` sur sw.js), copié dans `app/_headers`. L'appli enregistre
   le service worker elle-même (`initPwa`) et affiche « Nouvelle version prête » au
   `controllerchange`. Toute ressource externe nouvelle doit être ajoutée à la CSP de `_headers`.
-- Mise en ligne actuelle : page claude.ai privée **https://claude.ai/artifact/GuMWU7wDLNb8FW76ZGpfbc**
+- Mise en ligne de la version autonome : **GitHub Pages**, réglé par l'utilisatrice sur la branche
+  de travail, racine du dépôt → **https://pierreprz.github.io/Fanapa/app/**. `index.html` à la
+  racine renvoie vers `app/` ; `.nojekyll` désactive Jekyll (fichiers servis tels quels). Chaque
+  push sur la branche publiée redéploie le site (workflow « pages build and deployment »).
+  GitHub Pages ignore `_headers` (pas de CSP côté GitHub). Les deux versions (GitHub Pages et
+  claude.ai) ont des données et une numérotation séparées : une seule doit servir à facturer.
+- Version claude.ai : page claude.ai privée **https://claude.ai/artifact/GuMWU7wDLNb8FW76ZGpfbc**
   (fichier publié : `dist/artifact/index.html`, contenu sans squelette HTML, `<title>` en tête :
   claude.ai ajoute doctype, head et body). Pour la mettre à jour : `npm run build`, puis outil
   Artifact, `action: publish`, `url` ci-dessus, en OMETTANT `capabilities` pour garder la
