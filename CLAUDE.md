@@ -54,17 +54,19 @@ tutoiement ; tout ce que voit le client final (PDF, e-mails, relances) est au vo
   `cc` si « Me mettre en copie », dans l'ordre de `mailerOrder()`. **iPhone / iPad** (`isIOS`) :
   IMPOSSIBLE d'ouvrir Gmail avec à la fois l'adresse remplie ET le PDF joint (le lien de Gmail ne
   transporte pas de fichier ; le menu de partage, seul à donner un fichier à Gmail, ne remplit pas
-  le destinataire). Étape « Envoie la facture » (`#stp-send`), deux façons :
-  1) en premier (appli autonome), « Gmail avec la facture jointe » (`share-mail`, nom de la
-  messagerie préférée) : partage du PDF + message, adresse copiée à coller ; Gmail y prend le NOM
-  DU FICHIER comme objet (d'où `shareFileName(objet)`) et met le message en un seul paragraphe ;
-  2) le mail tout prêt et mis en forme, sous-étapes a/b/c (`.subs`) : a. « Enregistrer la
-  facture » dans Fichiers (`#stp-pdf`), b. « Ouvrir Gmail » (`#stp-mail`) ouvre l'APPLI Gmail
-  (`googlegmail:///co?to=&cc=&subject=&body=`, corps en CRLF ; le lien web mail.google.com
-  n'ouvre sur iPhone que la boîte de réception), Mail = `mailto:` (messagerie par défaut),
-  Outlook = `ms-outlook://compose?…`, c. joindre le PDF avec le trombone (`attachHintHTML`, nom
-  du fichier rappelé). Android (appli autonome) : partage en premier. Ordinateur : PDF à
-  enregistrer puis liens web.
+  le destinataire). Choix de l'utilisatrice : PAS de partage « facture jointe » sur iPhone, seulement
+  le mail tout prêt et mis en forme, étape « Envoie la facture » (`#stp-send`), sous-étapes a/b/c
+  (`.subs`) : a. « Enregistrer la facture » dans Fichiers (`#stp-pdf`), b. « Ouvrir Gmail »
+  (`#stp-mail`) ouvre l'APPLI Gmail (`googlegmail:///co?to=&cc=&subject=&body=`, corps en CRLF ;
+  le lien web mail.google.com n'ouvre sur iPhone que la boîte de réception), Mail = `mailto:`
+  (messagerie par défaut), Outlook = `ms-outlook://compose?…`, c. joindre le PDF avec le trombone
+  (`attachHintHTML`, nom du fichier rappelé). **Pièce jointe obligatoire** : tant que le PDF n'a
+  pas été enregistré pendant la session (`S.pdfSaved`, clé `savedKey(numéro, acquittée)`, rempli
+  par « Enregistrer » de la feuille d'envoi ou de la fiche), les boutons de messagerie sont
+  verrouillés (`data-locked`, sans lien, `pdfSavedForSend()`) sur iPhone ET sur ordinateur ; les
+  toucher rappelle l'étape a. Sans enregistrement possible (`!S.dl`), rien n'est verrouillé.
+  Android (appli autonome) : partage en premier (`share-mail`, nom de fichier = objet via
+  `shareFileName`). Ordinateur : PDF à enregistrer puis liens web.
   Noms de PDF (`pdfName`) en caractères simples, « Facture FA-2026-005 - FAN'APA.pdf » : avec
   un accent ou une apostrophe typographique, Chromium sous Linux sans locale UTF-8 remplace le
   nom par « download ».

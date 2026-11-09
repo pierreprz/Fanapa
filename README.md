@@ -8,10 +8,10 @@ Appli de facturation pour FAN'APA, micro-entreprise d'activité physique adapté
 - numérotation automatique et continue : FA-2026-001, puis 002, etc. ; impossible de choisir ou
   de sauter un numéro (réglages verrouillés dès la première facture) ;
 - PDF avec le logo, protégé contre la modification ;
-- envoi au client : sur iPhone, « Ouvrir Gmail » (ou Mail, Outlook) ouvre un nouveau mail avec
-  l'adresse du client (reprise de sa fiche), l'objet et le message mis en forme ; il reste à
-  joindre le PDF, enregistré juste avant dans Fichiers (trombone 📎). Variante en un geste : PDF
-  joint, adresse à coller. Sur ordinateur, e-mail pré-rempli (Gmail, Mail, Outlook) ;
+- envoi au client : on enregistre d'abord la facture (sinon Gmail, Mail et Outlook restent
+  verrouillés, pour ne jamais oublier la pièce jointe), puis « Ouvrir Gmail » ouvre un nouveau
+  mail avec l'adresse du client (reprise de sa fiche), l'objet et le message mis en forme ; on y
+  joint le PDF avec le trombone 📎. Sur ordinateur, e-mail pré-rempli (Gmail, Mail, Outlook) ;
 - suivi des paiements, **relances** des factures en retard, avoirs, PDF « facture acquittée » pour
   les mutuelles ;
 - livre des recettes et registre des factures en CSV, encaissements par trimestre pour l'Urssaf ;
@@ -136,8 +136,9 @@ Ne modifie jamais `app/index.html` à la main : change `src/`, puis `npm run bui
 Le parcours complet vérifie notamment : validation et numérotation, PDF, envoi, ouverture hors
 connexion, détection d'une nouvelle version, rappel de sauvegarde, sauvegarde puis import sur un
 autre navigateur (logo compris), relance d'une facture échue, verrou de numérotation entre deux
-onglets, encart d'installation iPhone, liens qui ouvrent Gmail / Mail / Outlook sur iPhone avec
-l'adresse du client et le message, et partage du PDF avec le message.
+onglets, encart d'installation iPhone, messagerie verrouillée tant que la facture n'est pas
+enregistrée, puis liens qui ouvrent Gmail / Mail / Outlook sur iPhone avec l'adresse du client et
+le message.
 
 ## Organisation
 

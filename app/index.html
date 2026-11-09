@@ -407,7 +407,11 @@ body.v-nouvelle main { padding-bottom: calc(var(--tabbar) + var(--safe-b) + 96px
 .addr { font-size: 13px; color: var(--muted); word-break: break-all; }
 #stp-mail #mail-links .btn:not(.block) { flex: 1; }
 .stp #mail-links + .addr { margin-top: 8px; }
-.stp p.or { margin: 18px 0 10px; color: var(--ink); font-weight: 500; font-size: 13.5px; }
+/* Messagerie verrouillée tant que le PDF n'est pas enregistré */
+#mail-links .btn.locked { opacity: .5; cursor: not-allowed; box-shadow: none; }
+#mail-links .lock-note { flex-basis: 100%; margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
+.subs > li.flash { animation: flash 1.2s ease; border-radius: 12px; }
+@keyframes flash { 0%, 100% { background: transparent; } 25% { background: var(--warn-bg); } }
 .subs { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; counter-reset: sub; }
 .subs > li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: start; }
 .subs > li::before { counter-increment: sub; content: counter(sub, lower-alpha); width: 24px; height: 24px; margin-top: 10px; border-radius: 50%; background: var(--mist); color: var(--teal-deep); display: grid; place-items: center; font-family: var(--font-display); font-weight: 800; font-size: 12px; }
@@ -1655,7 +1659,8 @@ const S = {
   got: { settings: false, invoices: false, clients: false, logo: false, drafts: false }, drafts: [],
   view: 'factures', draft: null, editSettings: null, settingsDirty: false,
   settingsSaving: null, settingsAgain: false, saveError: false, settingsWriteId: '',
-  sendInvoice: null, // facture dont la feuille d'envoi est ouverte
+  sendInvoice: null, sendPaid: false, // facture dont la feuille d'envoi est ouverte (version acquittée ?)
+  pdfSaved: new Set(), // PDF enregistrés pendant cette session : la messagerie ne s'ouvre qu'ensuite
   filter: 'all', q: '', year: NOW_YEAR, cq: '', busy: false
 };
 const settings = () => deepMerge(DEFAULT_SETTINGS, S.settingsRaw || {});
@@ -2797,6 +2802,11 @@ function renderAttachHint(mailer) {
   const el = $('#m-attach'); if (!el) return;
   el.innerHTML = attachHintHTML(mailer || mailerOrder()[0], S.sendFile || 'la facture');
 }
+/* Pièce jointe jamais oubliée : la messagerie ne s'ouvre qu'une fois le PDF enregistré pendant cette
+   session (bouton de la feuille d'envoi, ou PDF enregistré depuis la fiche de la facture). Sans
+   enregistrement possible ici, rien n'est verrouillé. */
+const savedKey = (n, paid) => n + (paid ? '|acquittee' : '');
+function pdfSavedForSend() { return !S.dl || S.pdfSaved.has(savedKey(S.sendInvoice, S.sendPaid)); }
 /* Destinataire : l'adresse tapée sur la facture, sinon celle de la fiche client (ajoutée après coup,
    par exemple). L'e-mail n'est pas une mention de la facture : la prendre dans la fiche ne la modifie pas. */
 const MAIL_CC_KEY = 'fanapa.mail.cc';
@@ -2834,6 +2844,7 @@ function openSend(n, mode) {
   const share = canShareMail();
   const ios = isIOS; // iPhone, iPad : les applis de messagerie s'ouvrent avec tout rempli
   S.sendInvoice = n;
+  S.sendPaid = paid;
   S.sendFile = pdfName(inv, paid);
   const toHelp = to
     ? (T(inv.client && inv.client.email) ? 'Adresse du client.' : 'Adresse reprise de la fiche client.')
@@ -2852,26 +2863,17 @@ function openSend(n, mode) {
       (st.sentAt ? '<p><b>Envoyée le ' + esc(K.fmtDate(st.sentAt)) + '</b></p>' : '<button type="button" class="btn" data-act="mark-sent" data-n="' + esc(n) + '">' + ic('check') + 'Marquer comme envoyée</button>') + '</div></div>';
   let steps;
   if (ios) {
-    /* iPhone. Google ne permet pas de joindre un fichier à un mail ouvert tout rempli (googlegmail:///co),
-       et le menu de partage d'Apple, seul à pouvoir donner le PDF à Gmail, ne remplit pas le destinataire.
-       D'où deux façons, l'une sous l'autre :
-       - « Gmail avec la facture jointe » (appli autonome) : menu de partage, PDF joint, objet = nom du
-         fichier (shareFileName), adresse copiée à coller ; Gmail met le message en un seul paragraphe ;
-       - le mail tout prêt et mis en forme (adresse, copie, objet, message) : a. enregistrer la facture dans
-         Fichiers, b. ouvrir Gmail / Mail / Outlook, c. joindre la facture avec le trombone. */
-    const fav = mailerOrder()[0];
-    const favName = { gmail: 'Gmail', mail: 'Mail', outlook: 'Outlook' }[fav];
-    const jointe = inv.kind === 'credit' ? 'l’avoir joint' : 'la facture' + (paid ? ' acquittée' : '') + ' jointe';
-    const shareBox = share
-      ? '<button type="button" class="btn navy block" data-act="share-mail" data-n="' + esc(n) + '"' + dataPaid + '>' + ic('send') + esc(favName) + ' avec ' + jointe + '</button>' +
-        '<p class="hint" style="margin-top:8px">Dans le menu qui s’ouvre, touche <b>' + esc(favName) + '</b> : ' + doc + ' est jointe et l’objet rempli. L’adresse du client est copiée en même temps : touche «&nbsp;À&nbsp;», puis <b>Coller</b>.' +
-        (fav === 'gmail' ? ' Gmail met le message en un seul paragraphe.' : '') + '</p>' +
-        '<p class="or">Ou, pour un mail tout prêt et mis en forme, où tu joins ' + doc + ' toi-même :</p>'
-      : '<p>Le mail s’ouvre tout prêt (adresse, objet, message) ; il reste à y joindre ' + doc + '.</p>';
+    /* iPhone. Google ne permet pas de joindre un fichier à un mail ouvert tout rempli (googlegmail:///co), et
+       le menu de partage ne remplit pas le destinataire : on garde le mail tout prêt et mis en forme, et la
+       facture s'y joint à la main. Pour ne jamais l'oublier, la messagerie ne s'ouvre qu'une fois la facture
+       enregistrée (pdfSavedForSend) : a. enregistrer la facture dans Fichiers, b. ouvrir Gmail / Mail /
+       Outlook (verrouillés avant), c. joindre le PDF avec le trombone. */
+    const saved = pdfSavedForSend();
     steps = '<div class="stp"><div><h3>Vérifie le mail</h3>' + mailbox + '</div></div>' +
-      '<div class="stp" id="stp-send"><div><h3>Envoie ' + doc + '</h3>' + shareBox +
+      '<div class="stp" id="stp-send"><div><h3>Envoie ' + doc + '</h3>' +
+      '<p>Enregistre d’abord ' + doc + ' : ta messagerie s’ouvre ensuite avec le mail tout prêt (adresse, objet, message), et tu y joins ' + doc + '.</p>' +
       '<ol class="subs">' +
-      '<li id="stp-pdf"><div><button type="button" class="btn" data-act="send-pdf" data-n="' + esc(n) + '"' + dataPaid + '>' + ic('dl') + 'Enregistrer ' + doc + (paid ? ' acquittée' : '') + '</button>' +
+      '<li id="stp-pdf"' + (saved ? ' class="done"' : '') + '><div><button type="button" class="btn' + (saved ? '' : ' navy') + '" data-act="send-pdf" data-n="' + esc(n) + '"' + dataPaid + '>' + ic('dl') + 'Enregistrer ' + doc + (paid ? ' acquittée' : '') + '</button>' +
       '<p class="hint" style="margin-top:6px">Dans le menu, choisis <b>Enregistrer dans Fichiers</b> (plus bas dans la liste), puis <b>Enregistrer</b>. Fichier : ' + esc(S.sendFile) + '</p></div></li>' +
       '<li id="stp-mail"><div><div class="btn-row" id="mail-links"></div><p class="addr" id="m-addr"></p></div></li>' +
       '<li><p class="attach" id="m-attach"></p></li>' +
@@ -2918,13 +2920,16 @@ function updateMailLinks() {
     outlook: { href: isIOS ? L.outlookApp : L.outlook, label: 'Outlook', web: !isIOS }
   };
   const wide = !!$('#stp-mail'); // iPhone : grand bouton pour la messagerie préférée, les autres en dessous
-  // Un seul bouton plein par étape : s'il y a déjà « Gmail avec la facture jointe », celui-ci est en contour
-  const lead = wide && $('#stp-send [data-act="share-mail"]') ? ' block' : ' navy' + (wide ? ' block' : '');
+  // Tant que le PDF n'est pas enregistré, les boutons sont verrouillés (sans lien) et le disent
+  const locked = !!$('#sheet [data-act="send-pdf"]') && !pdfSavedForSend();
   box.innerHTML = mailerOrder().map((k, i) => {
     const m = apps[k];
-    return '<a class="btn' + (i ? '' : lead) + '" data-mailer="' + k + '" href="' + esc(m.href) + '"' + (m.web ? ' target="_blank" rel="noopener"' : '') + '>' +
-      ic(i ? (m.web ? 'ext' : 'mail') : 'send') + (i ? '' : 'Ouvrir ') + m.label + '</a>';
-  }).join('');
+    const cls = 'btn' + (i ? '' : (locked ? '' : ' navy') + (wide ? ' block' : ''));
+    const inner = ic(locked ? 'lock' : (i ? (m.web ? 'ext' : 'mail') : 'send')) + (i ? '' : 'Ouvrir ') + m.label;
+    return locked
+      ? '<a class="' + cls + ' locked" role="link" aria-disabled="true" data-locked="' + k + '">' + inner + '</a>'
+      : '<a class="' + cls + '" data-mailer="' + k + '" href="' + esc(m.href) + '"' + (m.web ? ' target="_blank" rel="noopener"' : '') + '>' + inner + '</a>';
+  }).join('') + (locked ? '<p class="lock-note">Enregistre d’abord le PDF : ta messagerie s’ouvre ensuite.</p>' : '');
   renderAttachHint();
   $('#m-addr').textContent = to
     ? 'Destinataire : ' + to + (cc ? ' · en copie : ' + cc : '') + (K.validEmail(to) ? '' : ' (adresse à vérifier)')
@@ -3544,6 +3549,15 @@ document.addEventListener('click', e => {
   // Bouton de messagerie : le lien s'ouvre normalement ; on retient la messagerie choisie pour la prochaine fois
   const ml = e.target.closest('a[data-mailer]');
   if (ml) { LS.set(MAILER_KEY, ml.dataset.mailer); renderAttachHint(ml.dataset.mailer); const s = $('#stp-mail'); if (s) s.classList.add('done'); return; }
+  // Messagerie encore verrouillée : on montre l'étape « Enregistrer la facture »
+  const lk = e.target.closest('a[data-locked]');
+  if (lk) {
+    e.preventDefault();
+    toast('Enregistre d’abord le PDF : tu le joindras ensuite au mail.');
+    const s = $('#stp-pdf');
+    if (s) { s.scrollIntoView({ block: 'center', behavior: 'smooth' }); s.classList.remove('flash'); void s.offsetWidth; s.classList.add('flash'); }
+    return;
+  }
   const a = e.target.closest('[data-act]'); if (!a) return;
   const act = a.dataset.act, v = a.dataset.v, n = a.dataset.n;
   const d = S.draft;
@@ -3600,14 +3614,17 @@ document.addEventListener('click', e => {
     case 'install-later': LS.set(INSTALL_SNOOZE, Date.now() + 14 * 86400000); renderList(); break;
     case 'transfer-later': LS.set(TRANSFER_SNOOZE, Date.now() + 365 * 86400000); renderList(); break;
     case 'backup-later': LS.set(BACKUP_SNOOZE, Date.now() + 3 * 86400000); renderList(); toast('D’accord, je te le rappellerai dans quelques jours.'); break;
-    case 'pdf': savePdf(findInv(n), false).then(ok => { if (ok) toast('PDF enregistré'); }); break;
-    case 'pdf-paid': savePdf(findInv(n), true).then(ok => { if (ok) toast('PDF acquitté enregistré'); }); break;
+    case 'pdf': savePdf(findInv(n), false).then(ok => { if (ok) { S.pdfSaved.add(savedKey(n, false)); toast('PDF enregistré'); } }); break;
+    case 'pdf-paid': savePdf(findInv(n), true).then(ok => { if (ok) { S.pdfSaved.add(savedKey(n, true)); toast('PDF acquitté enregistré'); } }); break;
     case 'send-pdf': {
       const inv = findInv(n);
       savePdf(inv, !!a.dataset.paid).then(ok => {
         if (!ok) return;
+        S.pdfSaved.add(savedKey(n, !!a.dataset.paid)); // la messagerie se déverrouille
+        a.classList.remove('navy');
         const s = $('#stp-pdf'); if (s) s.classList.add('done');
-        toast($('#stp-mail') ? 'PDF enregistré : ouvre maintenant ta messagerie' : 'PDF enregistré : joins-le à ton mail');
+        updateMailLinks();
+        toast('PDF enregistré : ouvre maintenant ta messagerie');
       });
       break;
     }

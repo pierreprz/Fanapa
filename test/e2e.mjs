@@ -176,9 +176,11 @@ try {
 
   // Envoi : PDF + liens de messagerie
   await page.click('.sheet [data-act="send"]');
+  assert.ok(await page.$$eval('#mail-links a', as => as.length === 3 && as.every(a => a.dataset.locked && !a.getAttribute('href'))), 'messagerie verrouillée avant d’enregistrer le PDF');
   const pdf1 = await download('[data-act="send-pdf"]');
   assert.equal(pdf1.name, `Facture FA-${YEAR}-001 - FAN'APA.pdf`, 'nom de fichier lisible par le client');
   assert.ok(pdf1.size > 50000);
+  await page.waitForSelector('#mail-links a[data-mailer]');
   const links = await page.$$eval('#mail-links a', as => as.map(a => a.href));
   assert.ok(links[0].startsWith('https://mail.google.com/') && links[1].startsWith('mailto:jeanne.martin@exemple.fr'));
   await page.click('[data-act="mark-sent"]');
@@ -367,6 +369,26 @@ try {
   await p3.click('.sheet [data-act="send"]');
   await p3.waitForSelector('#mail-links a');
   const file3 = `Facture FA-${YEAR}-001 - FAN'APA.pdf`;
+  // Plus de partage « facture jointe » sur iPhone : le mail tout prêt, PDF enregistré d'abord
+  assert.equal(await p3.$('[data-act="share-mail"]'), null, 'pas de bouton « Gmail avec la facture jointe »');
+  assert.ok(await p3.$$eval('#mail-links a', as => as.length === 3 && as.every(a => a.dataset.locked && !a.getAttribute('href'))), 'messagerie verrouillée avant d’enregistrer la facture');
+  assert.match(await p3.textContent('#mail-links'), /Enregistre d’abord le PDF/);
+  assert.equal(await p3.$$eval('#stp-send .btn.navy', els => els.map(b => b.dataset.act).join()), 'send-pdf', 'seul bouton principal : Enregistrer la facture');
+  await p3.$eval('#mail-links a[data-locked="gmail"]', a => a.click()); // toucher Gmail trop tôt : on rappelle l'étape a
+  await p3.waitForFunction(() => /Enregistre d’abord le PDF/.test(document.querySelector('#toast').textContent));
+  await p3.waitForTimeout(400);
+  await p3.screenshot({ path: join(OUT, '10-iphone-envoi.png') });
+  await p3.$eval('#stp-send', el => el.scrollIntoView({ block: 'start' }));
+  await p3.waitForTimeout(300);
+  await p3.screenshot({ path: join(OUT, '10b-iphone-envoi-verrou.png') });
+  // a. « Enregistrer la facture » : menu de partage avec le PDF seul, puis la messagerie se déverrouille
+  await p3.click('#stp-pdf [data-act="send-pdf"]');
+  await p3.waitForFunction(() => window.__shared.length === 1);
+  let shared = (await p3.evaluate(() => window.__shared))[0];
+  assert.equal(shared.files.length, 1);
+  assert.equal(shared.files[0].name, file3);
+  await p3.waitForSelector('#stp-pdf.done');
+  await p3.waitForSelector('#mail-links a[data-mailer]');
   const iosLinks = await p3.$$eval('#mail-links a', as => as.map(a => ({ k: a.dataset.mailer, href: a.getAttribute('href'), text: a.textContent })));
   assert.deepEqual(iosLinks.map(l => l.k), ['gmail', 'mail', 'outlook'], 'Gmail en premier');
   assert.equal(iosLinks[0].text, 'Ouvrir Gmail');
@@ -379,22 +401,10 @@ try {
   assert.doesNotMatch(gBody, /Autonomie/);
   assert.match(await p3.textContent('#m-attach'), /dans Gmail, touche le trombone/);
   assert.ok((await p3.textContent('#m-attach')).includes(file3), 'le nom du PDF à joindre est indiqué');
-  // En premier : Gmail avec la facture déjà jointe (menu de partage), seul bouton plein de l'étape
-  assert.equal(await p3.textContent('#stp-send [data-act="share-mail"]'), 'Gmail avec la facture jointe');
-  assert.match(await p3.textContent('#stp-send'), /L’adresse du client est copiée en même temps/);
-  assert.equal(await p3.$$eval('#stp-send .btn.navy', els => els.length), 1, 'un seul bouton principal');
-  await p3.waitForTimeout(400);
-  await p3.screenshot({ path: join(OUT, '10-iphone-envoi.png') });
+  assert.equal(await p3.$$eval('#stp-send .btn.navy', els => els.map(b => b.dataset.mailer).join()), 'gmail', 'après l’enregistrement : « Ouvrir Gmail » devient le bouton principal');
   await p3.$eval('#stp-send', el => el.scrollIntoView({ block: 'start' }));
-  await p3.waitForTimeout(200);
-  await p3.screenshot({ path: join(OUT, '10b-iphone-envoi-gmail.png') });
-  // Étape « Enregistre la facture dans Fichiers » : menu de partage avec le PDF seul
-  await p3.click('#stp-pdf [data-act="send-pdf"]');
-  await p3.waitForFunction(() => window.__shared.length === 1);
-  let shared = (await p3.evaluate(() => window.__shared))[0];
-  assert.equal(shared.files.length, 1);
-  assert.equal(shared.files[0].name, file3);
-  await p3.waitForSelector('#stp-pdf.done');
+  await p3.waitForTimeout(300);
+  await p3.screenshot({ path: join(OUT, '10c-iphone-envoi-pret.png') });
   // La messagerie choisie est retenue (le lien lui-même n'est pas suivi dans le test)
   await p3.evaluate(() => {
     const a = document.querySelector('#mail-links a[data-mailer="mail"]');
@@ -403,26 +413,17 @@ try {
   });
   await p3.waitForSelector('#stp-mail.done');
   assert.match(await p3.textContent('#m-attach'), /dans Mail, touche le texte du message/);
-  // « Gmail avec la facture jointe » : PDF joint, objet et message ; l'adresse est copiée pour être collée
-  await p3.click('#stp-send [data-act="share-mail"]');
-  await p3.waitForFunction(() => window.__shared.length === 2);
-  shared = (await p3.evaluate(() => window.__shared))[1];
-  assert.equal(shared.files.length, 1);
-  assert.equal(shared.files[0].name, `Facture FA-${YEAR}-001 – FAN’APA.pdf`, 'Gmail fait du nom du fichier l’objet du mail : c’est l’objet choisi');
-  assert.equal(shared.files[0].type, 'application/pdf');
-  assert.ok(shared.files[0].size > 50000);
-  assert.match(shared.text, /^Bonjour M\. Paul Durand,/);
-  assert.match(shared.title, /^Facture FA-\d{4}-001 – FAN’APA$/);
-  await p3.waitForSelector('#stp-send.done');
+  assert.equal(await p3.evaluate(() => window.__shared.length), 1, 'aucun autre partage : la facture se joint dans le mail');
+  // Rouverte pendant la même session : facture déjà enregistrée, messagerie préférée en premier
   await p3.click('.sheet [data-act="close"]');
   await p3.click('.tabs [data-go="factures"]');
   await p3.click(`.row[data-n="FA-${YEAR}-001"]`);
   await p3.click('.sheet [data-act="send"]');
-  await p3.waitForSelector('#mail-links a');
+  await p3.waitForSelector('#mail-links a[data-mailer]');
   assert.deepEqual(await p3.$$eval('#mail-links a', as => as.map(a => a.dataset.mailer)), ['mail', 'gmail', 'outlook'], 'messagerie préférée en premier');
-  assert.equal(await p3.textContent('#stp-send [data-act="share-mail"]'), 'Mail avec la facture jointe');
+  assert.ok(await p3.$('#stp-pdf.done'), 'étape a déjà faite : rien à refaire');
   await p3.click('.sheet [data-act="close"]');
-  step('iPhone : « Gmail avec la facture jointe » en premier (PDF joint, adresse copiée) ; ou mail tout prêt : Fichiers, appli Gmail remplie, trombone');
+  step('iPhone : mail tout prêt seulement ; Gmail, Mail et Outlook verrouillés tant que la facture n’est pas enregistrée, puis appli Gmail remplie et trombone');
 
   /* ================= 4. iPhone, appli installée encore vide : récupérer ce qui a été saisi dans Safari ================= */
   const ctx4 = await browser.newContext({ ...iphone, locale: 'fr-FR' });
@@ -490,7 +491,7 @@ try {
   step('clients conservés : fiche refermée sans « Enregistrer », client d’une facture non validée (sans doublon), case décochée, suppression');
 
   /* ================= 6. Brouillons, validation définitive, numérotation imposée ================= */
-  const ctx6 = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'fr-FR' });
+  const ctx6 = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'fr-FR', acceptDownloads: true });
   const p6 = await ctx6.newPage();
   watch(p6, '[6]');
   const store6 = storeOf(p6);
@@ -602,6 +603,8 @@ try {
   await openSendFor(`FA-${YEAR}-002`);
   assert.equal(await p6.inputValue('#m-to'), 'alice@exemple.fr', 'destinataire repris de la fiche client');
   assert.match(await p6.textContent('#m-to-help'), /fiche client/);
+  await p6.click('[data-act="send-pdf"]');                       // la messagerie s'ouvre une fois le PDF enregistré
+  await p6.waitForSelector('#mail-links a[data-mailer]');
   let hrefs = await p6.$$eval('#mail-links a', as => as.map(a => a.href));
   assert.ok(hrefs.some(h => h.startsWith('mailto:alice@exemple.fr')) && hrefs.some(h => /mail\.google\.com.*to=alice%40exemple\.fr/.test(h)));
   await p6.check('#m-cc');                                     // « Me mettre en copie »
