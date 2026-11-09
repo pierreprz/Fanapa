@@ -283,15 +283,28 @@
     };
   }
 
+  /* ---------- Avoir : total (annule la facture) ou partiel (creditOf.full === false) ---------- */
+  function creditText(inv, sp) {
+    const n = (inv && inv.creditOf && inv.creditOf.number) || '';
+    const partial = !!(inv && inv.creditOf && inv.creditOf.full === false);
+    return (partial ? 'Cet avoir annule partiellement la facture n°' : 'Cet avoir annule la facture n°') + (sp == null ? NB : sp) + n +
+      '. Son montant vous sera remboursé ou déduit d’une prochaine facture.';
+  }
+
   /* ---------- Relance d'une facture impayée (vouvoiement, ton courtois) ---------- */
   function reminderLabel(n) {
     n = Math.max(1, Math.floor(Number(n) || 1));
     return n === 1 ? 'Relance' : n + 'e relance';
   }
-  function buildReminderMail(inv, settings, count) {
+  // opts.due : reste dû en centimes quand un avoir partiel a réduit la facture
+  function buildReminderMail(inv, settings, count, opts) {
     const n = Math.max(1, Math.floor(Number(count) || 1));
     const f = mailFields(inv, settings);
     const c = inv.client || {};
+    const rest = opts && Number.isFinite(opts.due) ? Math.round(opts.due) : null;
+    if (rest !== null && inv.totals && rest !== Math.abs(inv.totals.ttc)) {
+      f.montant += ' (reste dû après avoir : ' + fmtMoney(rest, { sep: ' ' }) + ')';
+    }
     const due = inv.term === 'reception' ? 'payable à réception' : 'arrivée à échéance le ' + fmtDate(inv.dueDate);
     let body = 'Bonjour {client},\n\n' +
       (n === 1 ? 'Sauf erreur de ma part, la facture' : 'Je me permets de revenir vers vous : la facture') +
@@ -562,7 +575,7 @@
     /* --- Règlement & mentions --- */
     const pay = [];
     if (isCredit) {
-      pay.push({ t: 'Cet avoir annule la facture n°' + NB + ((inv.creditOf && inv.creditOf.number) || '') + '. Son montant vous sera remboursé ou déduit d’une prochaine facture.', size: 8 });
+      pay.push({ t: creditText(inv, NB), size: 8 });
     } else {
       pay.push({ t: 'Échéance : ' + dueSentence(inv) + '.', size: 8, f: 'S' });
       if ((inv.methods || []).length) pay.push({ t: 'Moyens de paiement acceptés : ' + methodsText(inv.methods) + '.', size: 8 });
@@ -624,7 +637,7 @@
     methodLong, methodLabel, methodsText, vatMention, computeTotals, lineTotal,
     sellerName, sellerLines, clientAddressLines, serviceText, dueShort, dueSentence, proLateText, insuranceText,
     cleanPrefix, seriesKey, formatNumber, nextSeq,
-    mailFields, fillTemplate, buildMail, reminderLabel, buildReminderMail,
+    mailFields, fillTemplate, buildMail, reminderLabel, buildReminderMail, creditText,
     buildInvoicePDF, pdfClean, csvMoney, toCSV
   };
 })(typeof window !== 'undefined' ? window : globalThis);

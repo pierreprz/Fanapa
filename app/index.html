@@ -93,7 +93,9 @@ svg.i { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-widt
 
 main { padding: 16px 16px calc(var(--tabbar) + var(--safe-b) + 28px); min-width: 0; }
 .view { display: none; max-width: 1240px; margin: 0 auto; }
-.view.on { display: block; animation: rise .28s ease-out both; }
+/* « backwards » et pas « both » : une animation de transform qui reste appliquée fait de la vue le repère
+   des éléments fixes, et la barre du total ne restait plus collée en bas de l'écran */
+.view.on { display: block; animation: rise .28s ease-out backwards; }
 @keyframes rise { from { opacity: .001; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 .banner { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; margin: 0 0 14px; font-size: 13.5px; }
@@ -178,8 +180,17 @@ input[type="date"] { min-height: 46px; }
 /* ---------- Ticket du numéro ---------- */
 .ticket {
   position: relative; overflow: hidden; border-radius: 22px; padding: 18px 20px 20px; color: #fff;
-  background: var(--navy); isolation: isolate;
+  background: var(--navy); isolation: isolate; transition: background-color .25s ease;
 }
+/* Facture ou avoir : le choix se fait au-dessus du bandeau, qui change de couleur pour un avoir */
+.kind-seg { display: grid; width: 100%; margin: 0 0 12px; }
+.kind-seg button { font-size: 15px; min-height: 44px; }
+.ticket.credit { background: #4C3D8F; }
+.ticket.credit .eyebrow { color: #D9D2F5; }
+.ticket.credit .no .ser { color: #E6E1FA; }
+.cr-client { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--mist); display: grid; gap: 2px; font-size: 14px; }
+.cr-client span, .cr-client small { color: var(--muted); }
+.cr-client small { font-size: 12.5px; }
 .ticket .wave { position: absolute; right: -10px; bottom: -6px; width: 72%; max-width: 340px; z-index: -1; opacity: .95; }
 .ticket .eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 11.5px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: #A9DADD; }
 .ticket .eyebrow i { width: 7px; height: 7px; border-radius: 50%; background: var(--leaf); box-shadow: 0 0 0 4px rgba(122,182,72,.22); }
@@ -552,6 +563,10 @@ body.v-nouvelle .toast { bottom: calc(var(--tabbar) + var(--safe-b) + 92px); }
       <h1 class="sr" id="h-nouvelle">Nouvelle facture</h1>
       <div class="editor">
         <div class="ed-form" id="ed-form">
+          <div class="seg kind-seg" id="kind-seg" role="group" aria-label="Type de document">
+            <button type="button" data-act="kind" data-v="invoice" aria-pressed="true">Facture</button>
+            <button type="button" data-act="kind" data-v="credit" aria-pressed="false">Avoir</button>
+          </div>
           <div class="ticket" id="ticket">
             <svg class="wave" viewBox="0 0 340 120" aria-hidden="true"><path d="M0 92 C 60 60, 120 118, 190 86 S 300 40, 340 58 L340 120 L0 120Z" fill="#127A83" opacity=".55"/><path d="M0 104 C 70 80, 130 124, 200 100 S 300 70, 340 80" fill="none" stroke="#7AB648" stroke-width="5" stroke-linecap="round"/><path d="M40 112 C 110 96, 170 122, 240 108 S 320 92, 340 96" fill="none" stroke="#1A96A0" stroke-width="3" stroke-linecap="round" opacity=".9"/></svg>
             <span class="eyebrow"><i></i><span id="tk-eyebrow">Brouillon · prochain numéro</span></span>
@@ -567,7 +582,7 @@ body.v-nouvelle .toast { bottom: calc(var(--tabbar) + var(--safe-b) + 92px); }
           </div>
         </div>
         <aside class="ed-preview" aria-label="Aperçu de la facture">
-          <div class="pv-h"><span>Aperçu de la facture</span><span>Format A4 · PDF</span></div>
+          <div class="pv-h"><span id="pv-title">Aperçu de la facture</span><span>Format A4 · PDF</span></div>
           <div id="pv-desk"></div>
         </aside>
       </div>
@@ -1217,15 +1232,28 @@ body.v-nouvelle .toast { bottom: calc(var(--tabbar) + var(--safe-b) + 92px); }
     };
   }
 
+  /* ---------- Avoir : total (annule la facture) ou partiel (creditOf.full === false) ---------- */
+  function creditText(inv, sp) {
+    const n = (inv && inv.creditOf && inv.creditOf.number) || '';
+    const partial = !!(inv && inv.creditOf && inv.creditOf.full === false);
+    return (partial ? 'Cet avoir annule partiellement la facture n°' : 'Cet avoir annule la facture n°') + (sp == null ? NB : sp) + n +
+      '. Son montant vous sera remboursé ou déduit d’une prochaine facture.';
+  }
+
   /* ---------- Relance d'une facture impayée (vouvoiement, ton courtois) ---------- */
   function reminderLabel(n) {
     n = Math.max(1, Math.floor(Number(n) || 1));
     return n === 1 ? 'Relance' : n + 'e relance';
   }
-  function buildReminderMail(inv, settings, count) {
+  // opts.due : reste dû en centimes quand un avoir partiel a réduit la facture
+  function buildReminderMail(inv, settings, count, opts) {
     const n = Math.max(1, Math.floor(Number(count) || 1));
     const f = mailFields(inv, settings);
     const c = inv.client || {};
+    const rest = opts && Number.isFinite(opts.due) ? Math.round(opts.due) : null;
+    if (rest !== null && inv.totals && rest !== Math.abs(inv.totals.ttc)) {
+      f.montant += ' (reste dû après avoir : ' + fmtMoney(rest, { sep: ' ' }) + ')';
+    }
     const due = inv.term === 'reception' ? 'payable à réception' : 'arrivée à échéance le ' + fmtDate(inv.dueDate);
     let body = 'Bonjour {client},\n\n' +
       (n === 1 ? 'Sauf erreur de ma part, la facture' : 'Je me permets de revenir vers vous : la facture') +
@@ -1496,7 +1524,7 @@ body.v-nouvelle .toast { bottom: calc(var(--tabbar) + var(--safe-b) + 92px); }
     /* --- Règlement & mentions --- */
     const pay = [];
     if (isCredit) {
-      pay.push({ t: 'Cet avoir annule la facture n°' + NB + ((inv.creditOf && inv.creditOf.number) || '') + '. Son montant vous sera remboursé ou déduit d’une prochaine facture.', size: 8 });
+      pay.push({ t: creditText(inv, NB), size: 8 });
     } else {
       pay.push({ t: 'Échéance : ' + dueSentence(inv) + '.', size: 8, f: 'S' });
       if ((inv.methods || []).length) pay.push({ t: 'Moyens de paiement acceptés : ' + methodsText(inv.methods) + '.', size: 8 });
@@ -1558,7 +1586,7 @@ body.v-nouvelle .toast { bottom: calc(var(--tabbar) + var(--safe-b) + 92px); }
     methodLong, methodLabel, methodsText, vatMention, computeTotals, lineTotal,
     sellerName, sellerLines, clientAddressLines, serviceText, dueShort, dueSentence, proLateText, insuranceText,
     cleanPrefix, seriesKey, formatNumber, nextSeq,
-    mailFields, fillTemplate, buildMail, reminderLabel, buildReminderMail,
+    mailFields, fillTemplate, buildMail, reminderLabel, buildReminderMail, creditText,
     buildInvoicePDF, pdfClean, csvMoney, toCSV
   };
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -1692,9 +1720,15 @@ function newDraft(extra) {
     // dateAuto / serviceAuto : la date suit « aujourd'hui » tant qu'elle n'a pas été choisie à la main
     issueDate: t, dateAuto: true, service: { mode: 'single', date: t, from: '', to: '' }, serviceAuto: true,
     lines: [newLine(st.catalog[0])], term: st.defaults.term, dueDate: '',
-    methods: st.defaults.methods.slice(), notes: ''
+    methods: st.defaults.methods.slice(), notes: '',
+    // kind : 'invoice' (facture) ou 'credit' (avoir, rattaché à la facture creditOf { number, date })
+    kind: 'invoice', creditOf: null
   };
   return Object.assign(d, extra || {});
+}
+// Brouillon vierge du type demandé : un avoir commence sans ligne, elles viennent de la facture choisie
+function blankDraft(kind) {
+  return kind === 'credit' ? newDraft({ kind: 'credit', lines: [], saveClient: false, methods: [], term: 'reception' }) : newDraft();
 }
 let draftTimer = null;
 function saveDraftLocal() { clearTimeout(draftTimer); draftTimer = setTimeout(() => LS.set(DRAFT_KEY, S.draft), 350); }
@@ -1753,7 +1787,7 @@ function onSaveClientToggled(d, on) {
    Le numéro n'est attribué qu'à la validation définitive, à la suite du précédent :
    un brouillon supprimé ne laisse donc aucun trou dans la numérotation.
    ===================================================================== */
-const DRAFT_FIELDS = ['client', 'clientId', 'clientNew', 'saveClient', 'issueDate', 'dateAuto', 'service', 'serviceAuto', 'lines', 'term', 'dueDate', 'methods', 'notes'];
+const DRAFT_FIELDS = ['client', 'clientId', 'clientNew', 'saveClient', 'issueDate', 'dateAuto', 'service', 'serviceAuto', 'lines', 'term', 'dueDate', 'methods', 'notes', 'kind', 'creditOf'];
 // Un brouillon lu dans la base (écrit par un autre appareil) ou dans une sauvegarde est remis en forme
 function cleanDraftDoc(x) {
   if (!x || typeof x !== 'object' || !ID_RE.test(String(x.id || ''))) return null;
@@ -1776,6 +1810,13 @@ function cleanDraftDoc(x) {
     notes: str(x.notes), draftId: String(x.id), savedAt: typeof x.savedAt === 'string' ? x.savedAt.slice(0, 40) : null
   });
   d.clientNew = !!x.clientNew && !!d.clientId;
+  // Brouillon d'avoir : rattaché à une facture validée (numéro et date), jamais de fiche client créée
+  const co = obj(x.creditOf);
+  if (x.kind === 'credit') {
+    d.kind = 'credit';
+    d.creditOf = /^[A-Za-z0-9-]{3,40}$/.test(String(co.number || '')) ? { number: String(co.number), date: iso(co.date) } : null;
+    d.saveClient = false; d.clientNew = false; d.methods = []; d.term = 'reception';
+  }
   return { id: String(x.id), updatedAt: typeof x.updatedAt === 'string' ? x.updatedAt.slice(0, 40) : '', draft: d };
 }
 function draftBody(d, id, savedAt, updatedAt) {
@@ -1861,8 +1902,9 @@ function whenText(iso) {
 function openDraftSheet(id) {
   const entry = S.drafts.find(x => x.id === id); if (!entry) return;
   const inv = draftToInvoice(entry.draft);
-  openSheet(sheetHead('Brouillon', esc(inv.client.name || 'Client à indiquer') + ' · ' + esc(K.fmtMoney(inv.totals.ttc))) +
-    '<p class="hint" style="margin:0 0 12px">Pas encore de numéro : il sera attribué à la validation définitive, à la suite des autres factures. Un brouillon se modifie et se supprime librement.' +
+  const credit = inv.kind === 'credit';
+  openSheet(sheetHead(credit ? 'Brouillon d’avoir' : 'Brouillon', esc(inv.client.name || (credit ? 'Facture à choisir' : 'Client à indiquer')) + ' · ' + esc(K.fmtMoney(inv.totals.ttc))) +
+    '<p class="hint" style="margin:0 0 12px">Pas encore de numéro : il sera attribué à la validation définitive, à la suite ' + (credit ? 'des autres avoirs' : 'des autres factures') + '. Un brouillon se modifie et se supprime librement.' +
     (entry.updatedAt ? ' Dernière modification le ' + esc(whenText(entry.updatedAt)) + '.' : '') + '</p>' +
     '<div class="detail-actions"><button type="button" class="btn primary" data-act="draft-resume" data-id="' + esc(id) + '">' + ic('edit') + 'Reprendre la saisie</button>' +
     '<button type="button" class="btn danger" data-act="draft-del" data-id="' + esc(id) + '">' + ic('trash') + 'Supprimer le brouillon</button></div>' +
@@ -1886,8 +1928,9 @@ function draftsHTML() {
   return '<section class="drafts" id="drafts-block" aria-label="Brouillons"><div class="drafts-h"><h2>Brouillons <i>' + S.drafts.length + '</i></h2><p>Sans numéro : il est attribué à la validation définitive</p></div><div class="rows">' +
     S.drafts.map(e => {
       const inv = draftToInvoice(e.draft);
-      return '<button type="button" class="row" data-s="draft" data-act="draft-open" data-id="' + esc(e.id) + '"><span class="who">' + esc(inv.client.name || 'Client à indiquer') + '</span><span class="amt">' + K.fmtMoney(inv.totals.ttc) + '</span>' +
-        '<span class="meta">' + (e.updatedAt ? 'Modifié le ' + esc(whenText(e.updatedAt)) : 'Brouillon') + '</span><span class="st"><span class="pill s-draft">Brouillon</span></span></button>';
+      const credit = inv.kind === 'credit';
+      return '<button type="button" class="row" data-s="draft" data-act="draft-open" data-id="' + esc(e.id) + '"><span class="who">' + (credit ? 'Avoir · ' : '') + esc(inv.client.name || (credit ? 'facture à choisir' : 'Client à indiquer')) + '</span><span class="amt">' + K.fmtMoney(inv.totals.ttc) + '</span>' +
+        '<span class="meta">' + (e.updatedAt ? 'Modifié le ' + esc(whenText(e.updatedAt)) : 'Brouillon') + (credit && inv.creditOf ? ' · sur ' + esc(inv.creditOf.number) : '') + '</span><span class="st"><span class="pill s-draft">' + (credit ? 'Brouillon d’avoir' : 'Brouillon') + '</span></span></button>';
     }).join('') + '</div></section>';
 }
 function dueOf(d) {
@@ -1912,7 +1955,38 @@ function cleanClient(c) {
     email: (c.email || '').trim(), siren: c.type === 'pro' ? K.digits(c.siren) : ''
   };
 }
+/* ---------- Avoirs : toujours rattachés à une facture validée, pour tout ou partie de son montant ---------- */
+function creditsOf(n) { return S.invoices.filter(i => i.kind === 'credit' && i.creditOf && i.creditOf.number === n); }
+function creditedOf(n) { return creditsOf(n).reduce((a, c) => a + Math.abs((c.totals && c.totals.ttc) || 0), 0); }
+// Reste dû sur une facture une fois ses avoirs déduits
+function restOf(inv) { return !inv || inv.kind === 'credit' ? 0 : Math.max(0, ((inv.totals && inv.totals.ttc) || 0) - creditedOf(inv.number)); }
+// Montant encaissé : celui noté au paiement (reste dû après avoirs), sinon le total de la facture
+function paidAmountOf(inv) { const st = inv.status || {}; return Number.isFinite(st.paidAmount) ? st.paidAmount : ((inv.totals && inv.totals.ttc) || 0); }
+// Factures qu'un avoir peut encore corriger : validées, pas annulées, avec un reste
+function creditableInvoices() {
+  return S.invoices.filter(i => i.kind !== 'credit' && !(i.status && i.status.cancelledBy) && restOf(i) > 0)
+    .sort((a, b) => (b.issueDate || '').localeCompare(a.issueDate || '') || (b.seq || 0) - (a.seq || 0));
+}
+function creditDraftToInvoice(d) {
+  const st = settings();
+  const orig = d.creditOf ? findInv(d.creditOf.number) : null;
+  const inv = {
+    kind: 'credit', number: '', issueDate: d.issueDate,
+    service: orig ? clone(orig.service) : { mode: 'single', date: d.issueDate },
+    term: 'reception', dueDate: d.issueDate, client: cleanClient(d.client),
+    lines: d.lines.filter(l => (l.label || '').trim() || l.unit).map(l => ({ label: (l.label || '').trim(), detail: (l.detail || '').trim(), qty: num(l.qty), unit: Math.round(Number(l.unit) || 0) })),
+    // Même régime de TVA et mêmes conditions que la facture corrigée
+    vat: orig ? clone(orig.vat) : clone(st.vat), methods: [], notes: (d.notes || '').trim(), thanks: '',
+    seller: sellerSnapshot(st), insurance: clone(st.insurance), terms: orig ? clone(orig.terms || {}) : { penaltyRate: st.defaults.penaltyRate },
+    creditOf: d.creditOf ? { number: d.creditOf.number, date: d.creditOf.date || (orig && orig.issueDate) || '' } : null
+  };
+  inv.totals = K.computeTotals(inv.lines, inv.vat, -1);
+  // full : l'avoir couvre tout ce qui restait dû, la facture sera annulée ; sinon avoir partiel
+  if (inv.creditOf && orig) inv.creditOf.full = Math.abs(inv.totals.ttc) >= restOf(orig);
+  return inv;
+}
 function draftToInvoice(d) {
+  if (d.kind === 'credit') return creditDraftToInvoice(d);
   const st = settings();
   const inv = {
     kind: 'invoice', number: '', issueDate: d.issueDate,
@@ -2188,7 +2262,8 @@ function paperHTML(inv, o) {
   const methods = inv.methods || [];
   let pay = '';
   if (isCredit) {
-    pay = '<p>Cet avoir annule la facture n° ' + esc((inv.creditOf && inv.creditOf.number) || '') + '. Son montant vous sera remboursé ou déduit d’une prochaine facture.</p>';
+    // Même phrase que le PDF (avoir total ou partiel) ; brouillon sans facture choisie : on le rappelle
+    pay = inv.creditOf && inv.creditOf.number ? '<p>' + esc(K.creditText(inv, ' ')) + '</p>' : '<p>' + ph('', 'Choisis la facture concernée') + '</p>';
   } else {
     pay = '<p class="s">Échéance : ' + esc(K.dueSentence(inv)) + '.</p>';
     if (methods.length) pay += '<p>Moyens de paiement acceptés : ' + esc(K.methodsText(methods)) + '.</p>';
@@ -2487,7 +2562,11 @@ async function claimNumber(kind, iso, build) {
 function renderAll() {
   renderTicket();
   if (S.view === 'factures') renderList();
-  if (S.view === 'nouvelle') { if (!$('#ed-fields').firstChild) renderEditor(); else { renderPreview(); renderClientPicker(); renderCatalogChips(); } }
+  if (S.view === 'nouvelle') {
+    // Avoir ouvert avant le chargement des factures : la liste des factures à corriger apparaît dès qu'elles arrivent
+    const crWaiting = S.draft && S.draft.kind === 'credit' && !$('#cr-of') && creditableInvoices().length;
+    if (!$('#ed-fields').firstChild || crWaiting) renderEditor(); else { renderPreview(); renderClientPicker(); renderCatalogChips(); }
+  }
   if (S.view === 'clients') renderClients();
   if (S.view === 'structure') renderSettings();
   const vb = $('#btn-validate');
@@ -2513,9 +2592,16 @@ function go(view, opts) {
 }
 
 /* ---------- Ticket ---------- */
+// justValidated : true après une facture, 'credit' après un avoir (l'éditeur repart sur une facture)
 function renderTicket(justValidated) {
   const d = S.draft; if (!d) return;
-  const info = nextInfo('invoice', d.issueDate);
+  const credit = d.kind === 'credit';
+  const info = nextInfo(credit ? 'credit' : 'invoice', d.issueDate);
+  $('#ticket').classList.toggle('credit', credit);
+  $$('#kind-seg [data-v]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === (credit ? 'credit' : 'invoice'))));
+  $('#tk-text').textContent = credit
+    ? 'Les avoirs ont leur propre numérotation, à la suite du précédent. Un avoir annule tout ou partie d’une facture déjà validée.'
+    : 'Attribué automatiquement à la validation définitive, à la suite du précédent. Avant, tu peux garder la facture en brouillon.';
   const ser = info.series + '-';
   const seqStr = String(info.number.slice(ser.length));
   const lead = seqStr.match(/^0*/)[0];
@@ -2523,7 +2609,10 @@ function renderTicket(justValidated) {
   $('#tk-seq').innerHTML = S.got.invoices || !S.db
     ? '<span class="z">' + lead + '</span>' + esc(seqStr.slice(lead.length))
     : '…';
-  $('#tk-eyebrow').textContent = justValidated ? 'Validée · numéro suivant prêt' : (d.draftId ? 'Brouillon enregistré · prochain numéro' : 'Nouvelle facture · prochain numéro');
+  $('#tk-eyebrow').textContent = justValidated === 'credit' ? 'Avoir validé · prochaine facture'
+    : justValidated ? 'Validée · numéro suivant prêt'
+    : credit ? (d.draftId ? 'Brouillon d’avoir · prochain numéro' : 'Nouvel avoir · prochain numéro')
+    : (d.draftId ? 'Brouillon enregistré · prochain numéro' : 'Nouvelle facture · prochain numéro');
 }
 
 /* =====================================================================
@@ -2531,8 +2620,96 @@ function renderTicket(justValidated) {
    ===================================================================== */
 function field(label, inner, extra) { return '<label class="field' + (extra ? ' ' + extra : '') + '"><span>' + label + '</span>' + inner + '</label>'; }
 function inp(bind, val, attrs) { return '<input data-b="' + bind + '" value="' + esc(val) + '" ' + (attrs || '') + '>'; }
+/* Éditeur d'avoir : ① la facture corrigée (obligatoire, son client est repris tel quel),
+   ② les montants (toute la facture ou une partie, au plus le reste dû), ③ le motif. */
+function renderCreditEditor() {
+  const d = S.draft;
+  const orig = d.creditOf ? findInv(d.creditOf.number) : null;
+  const opts = creditableInvoices();
+  if (orig && !opts.includes(orig)) opts.unshift(orig);   // brouillon repris : sa facture reste affichée
+  const c = d.client;
+  const rest = orig ? restOf(orig) : 0;
+  const already = orig ? creditedOf(orig.number) : 0;
+  const label = i => i.number + ' · ' + (i.client ? i.client.name : '') + ' · ' + K.fmtMoney(i.totals.ttc) + (restOf(i) < i.totals.ttc ? ' (reste ' + K.fmtMoney(restOf(i)) + ')' : '');
+  const html =
+    '<div class="card"><div class="card-h"><span class="step">1</span><div><h2>Facture concernée</h2><p>Un avoir corrige toujours une facture déjà validée</p></div></div>' +
+    (opts.length
+      ? field('Facture à corriger', '<select id="cr-of"><option value="">Choisis la facture</option>' +
+        opts.map(i => '<option value="' + esc(i.number) + '"' + (orig && orig.number === i.number ? ' selected' : '') + '>' + esc(label(i)) + '</option>').join('') + '</select>')
+      : '<p class="hint" style="margin:0">Aucune facture validée à corriger pour l’instant : un avoir se rattache toujours à une facture.</p>') +
+    (orig ? '<div class="cr-client"><b>' + esc(c.name) + '</b><span>' + esc(K.clientAddressLines(c).join(', ')) + '</span>' +
+      '<small>Facture du ' + esc(K.fmtDate(orig.issueDate)) + ' · ' + esc(K.fmtMoney(orig.totals.ttc)) + (already ? ' · déjà ' + esc(K.fmtMoney(already)) + ' en avoir' : '') + '</small></div>' : '') +
+    '</div>' +
+    (orig
+      ? '<div class="card"><div class="card-h"><span class="step">2</span><div><h2>Montant de l’avoir</h2><p>Toute la facture, ou seulement ce que tu annules</p></div></div>' +
+        '<div class="grid" style="margin-bottom:12px">' + field('Date de l’avoir', inp('issueDate', d.issueDate, 'type="date"')) + '</div>' +
+        '<div class="lines" id="lines"></div>' +
+        '<div class="btn-row" style="margin-top:12px"><button type="button" class="btn small" data-act="line-add">' + ic('plus') + 'Ajouter une ligne</button>' +
+        '<button type="button" class="btn small" data-act="credit-all">' + ic('undo') + 'Toute la facture</button></div>' +
+        '<p class="hint">Au plus ' + esc(K.fmtMoney(rest)) + ' : ' + (already ? 'le reste de la facture ' : 'le montant de la facture ') + esc(orig.number) + '. Par exemple, pour une séance annulée sur quatre, mets la quantité à 1.</p>' +
+        '</div>' +
+        '<div class="card"><div class="card-h"><span class="step">3</span><div><h2>Motif</h2><p>Il apparaît sur l’avoir</p></div></div>' +
+        field('Motif (facultatif)', '<textarea data-b="notes" rows="2" placeholder="Ex. Séance du 12 novembre annulée">' + esc(d.notes) + '</textarea>') +
+        '</div>'
+      : '');
+  $('#ed-fields').innerHTML = html;
+  renderLines();
+  renderPreview();
+}
+// Facture choisie pour l'avoir : son client, ses dates et ses lignes sont repris (tout ce qui reste dû)
+function chooseCreditOf(number) {
+  const d = S.draft;
+  const orig = number ? findInv(number) : null;
+  if (!orig || orig.kind === 'credit') {
+    Object.assign(d, { creditOf: null, client: blankClient(), clientId: null, clientNew: false, lines: [] });
+    return;
+  }
+  const sv = orig.service || {};
+  Object.assign(d, {
+    creditOf: { number: orig.number, date: orig.issueDate },
+    client: Object.assign(blankClient(), clone(orig.client || {})), clientId: orig.clientId || null, clientNew: false, saveClient: false,
+    service: { mode: sv.mode === 'period' ? 'period' : 'single', date: sv.date || '', from: sv.from || '', to: sv.to || '' }, serviceAuto: false
+  });
+  fillCreditLines(d, orig);
+}
+// Lignes d'un avoir total : celles de la facture, ou une ligne « solde » quand des avoirs ont déjà été faits
+function fillCreditLines(d, orig) {
+  const rest = restOf(orig);
+  if (rest >= orig.totals.ttc) { d.lines = orig.lines.map(l => ({ id: uid(), label: l.label, detail: l.detail || '', qty: l.qty, unit: l.unit })); return; }
+  const vat = orig.vat || {};
+  const unit = vat.mode === 'subject' ? Math.round(rest / (1 + (Number(vat.rate) || 0) / 100)) : rest;
+  d.lines = [{ id: uid(), label: 'Solde de la facture ' + orig.number, detail: '', qty: 1, unit }];
+}
+// « Faire un avoir » depuis la fiche d'une facture : l'éditeur s'ouvre en avoir, facture déjà choisie
+async function startCredit(n) {
+  const orig = findInv(n); if (!orig) return;
+  const parked = await parkDraft();
+  clearTimeout(draftDocTimer);
+  S.draft = blankDraft('credit');
+  chooseCreditOf(n);
+  S.draft.pristine = false;
+  LS.set(DRAFT_KEY, S.draft);
+  closeSheet();
+  go('nouvelle');
+  if (parked) toast('La facture en cours a été mise de côté dans les brouillons');
+}
+// Sélecteur Facture / Avoir : ce qui était en cours part dans les brouillons, on repart sur l'autre type
+async function switchKind(kind) {
+  const d = S.draft; if (!d) return;
+  const cur = d.kind === 'credit' ? 'credit' : 'invoice';
+  if (kind === cur) return;
+  const parked = await parkDraft();
+  clearTimeout(draftDocTimer);
+  S.draft = blankDraft(kind);
+  LS.set(DRAFT_KEY, S.draft);
+  $('#ticket').classList.remove('poum', 'unpoum'); // pas de tampon « VALIDÉE » d'une facture sur un nouvel avoir
+  renderEditor(); renderTicket();
+  window.scrollTo({ top: 0 });
+  if (parked) toast(cur === 'credit' ? 'L’avoir en cours a été mis de côté dans les brouillons' : 'La facture en cours a été mise de côté dans les brouillons');
+}
 function renderEditor() {
   const d = S.draft;
+  if (d.kind === 'credit') { renderCreditEditor(); return; }
   const st = settings();
   const c = d.client;
   const isPro = c.type === 'pro';
@@ -2626,9 +2803,12 @@ function renderPreview() {
   pvRaf = requestAnimationFrame(() => {
     const d = S.draft; if (!d) return;
     const inv = draftToInvoice(d);
-    const info = nextInfo('invoice', d.issueDate);
+    const info = nextInfo(inv.kind, d.issueDate);
     $('#tb-total').textContent = K.fmtMoney(inv.totals.ttc);
-    $('#tb-mention').textContent = K.vatMention(inv.vat) || ('Dont TVA ' + K.fmtMoney(inv.totals.tva));
+    $('#tb-mention').textContent = inv.kind === 'credit'
+      ? (inv.creditOf ? (inv.creditOf.full ? 'Avoir total sur la facture ' : 'Avoir partiel sur la facture ') + inv.creditOf.number : 'Avoir : choisis la facture concernée')
+      : K.vatMention(inv.vat) || ('Dont TVA ' + K.fmtMoney(inv.totals.tva));
+    const pvt = $('#pv-title'); if (pvt) pvt.textContent = inv.kind === 'credit' ? 'Aperçu de l’avoir' : 'Aperçu de la facture';
     const pv = $('#pv-desk');
     if (pv && getComputedStyle(pv.parentElement).display !== 'none') pv.innerHTML = paperHTML(inv, { draft: true, nextNumber: S.got.invoices ? info.number + ' (à la validation)' : '' });
     const sh = $('#pv-sheet');
@@ -2645,7 +2825,7 @@ function renderPreview() {
 // Un brouillon jamais touché suit les réglages (prix du catalogue, échéance et moyens par défaut)
 function refreshPristineDraft() {
   if (!S.draft || !S.draft.pristine) return;
-  S.draft = newDraft();
+  S.draft = blankDraft(S.draft.kind); // un avoir vierge reste un avoir
   if (S.view === 'nouvelle') renderEditor();
 }
 function onDraftChanged(structural) {
@@ -2660,7 +2840,41 @@ function onDraftChanged(structural) {
 function lastOfSeries(series) {
   return S.invoices.filter(i => i.series === series).sort((a, b) => b.seq - a.seq)[0];
 }
+/* Avoir : mêmes mentions sur l'émetteur, référence obligatoire à la facture corrigée (numéro et date),
+   montant positif et au plus égal au reste dû, date ni antérieure à la facture ni au dernier avoir. */
+function creditChecks(d) {
+  const st = settings();
+  const inv = draftToInvoice(d);
+  const orig = d.creditOf ? findInv(d.creditOf.number) : null;
+  const out = [];
+  const add = (ok, level, label, help, fix) => out.push({ ok, level, label, help, fix });
+  add(!!(T(st.firstName) && T(st.lastName)), 'block', 'Ton nom et prénom, suivis de la mention EI', 'Obligatoire pour un entrepreneur individuel.', 'structure');
+  add(!!(T(st.address.line1) && T(st.address.zip) && T(st.address.city)), 'block', 'Adresse de ta structure', '', 'structure');
+  add(K.validSiret(st.siret), 'block', 'Numéro SIRET valide', st.siret ? 'Le SIRET saisi ne passe pas le contrôle : vérifie les 14 chiffres.' : '', 'structure');
+  add(!!orig, 'block', 'Facture concernée (numéro et date)', 'Choisis la facture que cet avoir corrige.', null);
+  if (orig) {
+    const cancelled = orig.status && orig.status.cancelledBy;
+    add(!cancelled, 'block', 'Facture encore à corriger', cancelled ? 'Elle est déjà annulée par l’avoir ' + cancelled + '.' : '', null);
+    add(!!(inv.client.name && inv.client.address.line1 && inv.client.address.zip && inv.client.address.city), 'block', 'Nom et adresse du client', 'Repris de la facture ' + orig.number + '.', null);
+  }
+  const badLine = inv.lines.find(l => !l.label || !(l.qty > 0));
+  add(inv.lines.length > 0 && !badLine, 'block', 'Désignation et quantité de chaque ligne', badLine ? 'Une ligne n’a pas de désignation ou de quantité.' : '', null);
+  const amount = Math.abs(inv.totals.ttc);
+  add(amount > 0, 'block', 'Montant de l’avoir supérieur à zéro', 'Indique ce que tu annules.', null);
+  if (orig) {
+    const rest = restOf(orig);
+    add(amount <= rest, 'block', 'Montant au plus égal à ' + (rest < orig.totals.ttc ? 'ce qui reste de la facture' : 'la facture'),
+      'Au plus ' + K.fmtMoney(rest) + ' sur la facture ' + orig.number + '.', null);
+    add(!!d.issueDate && d.issueDate >= orig.issueDate, 'block', 'Avoir daté après la facture', 'La facture ' + orig.number + ' est du ' + K.fmtDate(orig.issueDate) + '.', null);
+  }
+  const last = lastOfSeries(nextInfo('credit', d.issueDate).series);
+  add(!last || (last.issueDate || '') <= d.issueDate, 'block', 'Ordre chronologique respecté', last ? 'L’avoir ' + last.number + ' est daté du ' + K.fmtDate(last.issueDate) + ' : le nouveau ne peut pas être antérieur.' : '', null);
+  if (d.issueDate > K.todayISO()) add(false, 'warn', 'Date de l’avoir dans le futur', 'Vérifie que c’est bien voulu.', null);
+  add(!!T(st.insurance.insurer), 'warn', 'Assurance RC professionnelle', 'Mention à reporter sur tes factures et avoirs.', 'structure');
+  return out;
+}
 function checks(d) {
+  if (d.kind === 'credit') return creditChecks(d);
   const st = settings();
   const inv = draftToInvoice(d);
   const c = inv.client;
@@ -2694,19 +2908,27 @@ function openValidate() {
   const list = checks(d);
   const blocking = list.filter(x => !x.ok && x.level === 'block');
   const warns = list.filter(x => !x.ok && x.level === 'warn');
-  const info = nextInfo('invoice', d.issueDate);
   const inv = draftToInvoice(d);
+  const credit = inv.kind === 'credit';
+  const info = nextInfo(inv.kind, d.issueDate);
   const row = x => '<li><span class="dot ' + (x.ok ? 'ok' : (x.level === 'block' ? 'bad' : 'warn')) + '" style="width:20px;height:20px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:12px;font-weight:700;flex:none;margin-top:1px">' + (x.ok ? '✓' : (x.level === 'block' ? '✕' : '!')) + '</span><div>' + esc(x.label) +
     (!x.ok && x.help ? '<small>' + esc(x.help) + '</small>' : '') + (!x.ok && x.fix ? '<small><button type="button" class="linklike" data-act="fix" data-v="' + x.fix + '">Compléter Ma structure</button></small>' : '') + '</div></li>';
   const sorted = list.slice().sort((a, b) => (a.ok - b.ok) || ((a.level === 'block' ? 0 : 1) - (b.level === 'block' ? 0 : 1)));
   const draftBtn = '<button type="button" class="btn" data-act="draft-save">' + ic('file') + 'Enregistrer en brouillon</button>';
   // Deux choix : brouillon (sans numéro, modifiable) ou définitive (numéro suivant, plus jamais modifiable)
-  openSheet(sheetHead(blocking.length ? 'Il manque quelques mentions' : 'Enregistrer la facture', blocking.length
-    ? 'Pour la valider, complète les points en rouge. Tu peux aussi la garder en brouillon et la finir plus tard.'
-    : 'Garde-la en <b>brouillon</b> (sans numéro, modifiable), ou valide-la <b>définitivement</b> : elle prendra le numéro <b>' + esc(info.number) + '</b> pour un total de <b>' + esc(K.fmtMoney(inv.totals.ttc)) + '</b>.') +
+  const what = credit
+    ? 'pour un montant de <b>' + esc(K.fmtMoney(inv.totals.ttc)) + '</b>' + (inv.creditOf ? (inv.creditOf.full ? ' et annulera la facture <b>' + esc(inv.creditOf.number) + '</b>' : ' (avoir partiel sur la facture <b>' + esc(inv.creditOf.number) + '</b>)') : '')
+    : 'pour un total de <b>' + esc(K.fmtMoney(inv.totals.ttc)) + '</b>';
+  openSheet(sheetHead(blocking.length ? 'Il manque quelques mentions' : (credit ? 'Enregistrer l’avoir' : 'Enregistrer la facture'), blocking.length
+    ? 'Pour ' + (credit ? 'le' : 'la') + ' valider, complète les points en rouge. Tu peux aussi ' + (credit ? 'le' : 'la') + ' garder en brouillon et ' + (credit ? 'le' : 'la') + ' finir plus tard.'
+    : (credit ? 'Garde-le en <b>brouillon</b> (sans numéro, modifiable), ou valide-le <b>définitivement</b> : il prendra le numéro <b>'
+      : 'Garde-la en <b>brouillon</b> (sans numéro, modifiable), ou valide-la <b>définitivement</b> : elle prendra le numéro <b>') + esc(info.number) + '</b> ' + what + '.') +
     '<ul class="checklist">' + sorted.map(row).join('') + '</ul>' +
-    (blocking.length ? '<div class="btn-row"><button type="button" class="btn" data-act="close">Revenir à la facture</button>' + draftBtn + '</div>'
-      : '<p class="hint" style="margin:0 0 12px">' + ic('lock').replace('class="i"', 'class="i" style="width:15px;height:15px;vertical-align:-3px"') + ' Une facture validée ne se modifie plus et ne se supprime pas : en cas d’erreur, on l’annule par un avoir. Le numéro est attribué automatiquement, à la suite du précédent.' + (warns.length ? ' Les points en orange sont conseillés mais ne bloquent pas.' : '') + '</p>' +
+    (blocking.length ? '<div class="btn-row"><button type="button" class="btn" data-act="close">Revenir ' + (credit ? 'à l’avoir' : 'à la facture') + '</button>' + draftBtn + '</div>'
+      : '<p class="hint" style="margin:0 0 12px">' + ic('lock').replace('class="i"', 'class="i" style="width:15px;height:15px;vertical-align:-3px"') +
+        (credit ? ' Un avoir validé ne se modifie plus et ne se supprime pas. Les avoirs ont leur propre numérotation, attribuée automatiquement à la suite du précédent.'
+          : ' Une facture validée ne se modifie plus et ne se supprime pas : en cas d’erreur, on l’annule par un avoir. Le numéro est attribué automatiquement, à la suite du précédent.') +
+        (warns.length ? ' Les points en orange sont conseillés mais ne bloquent pas.' : '') + '</p>' +
       '<div class="btn-row">' + draftBtn + '<button type="button" class="btn primary" style="flex:1" data-act="confirm-validate" autofocus>' + ic('lock') + 'Valider définitivement ' + esc(info.number) + '</button></div>'));
 }
 async function doValidate(btn) {
@@ -2721,9 +2943,19 @@ async function doValidate(btn) {
     clearTimeout(draftDocTimer);
     let clientId = d.clientId;
     if (d.saveClient && !clientId) clientId = 'c-' + uid();
-    const inv = await write(() => claimNumber('invoice', d.issueDate, info => Object.assign({}, base, info, {
-      clientId: d.saveClient ? clientId : (d.clientId || null), status: {}, createdAt: nowIso, validatedAt: nowIso
+    const credit = base.kind === 'credit';
+    const orig = credit && base.creditOf ? findInv(base.creditOf.number) : null;
+    if (credit && !orig) throw { userMsg: 'Choisis la facture que cet avoir corrige.' };
+    // Avoir : série AV, à la suite du dernier avoir ; facture : série FA
+    const inv = await write(() => claimNumber(base.kind, d.issueDate, info => Object.assign({}, base, info, {
+      clientId: credit ? (d.clientId || null) : (d.saveClient ? clientId : (d.clientId || null)), status: {}, createdAt: nowIso, validatedAt: nowIso
     })));
+    // L'avoir couvre tout ce qui restait dû : la facture est annulée (seul son statut change)
+    if (credit && base.creditOf.full) {
+      const cancel = { cancelledBy: inv.number, cancelledAt: inv.issueDate };
+      await write(() => S.db.doc('invoices/' + orig.number).update({ status: cancel }));
+      orig.status = Object.assign({}, orig.status, cancel);
+    }
     if (d.saveClient && clientId) {
       const cdoc = Object.assign(cleanClient(d.client), { id: clientId, updatedAt: nowIso });
       const prev = S.clients.find(x => x.id === clientId);
@@ -2738,13 +2970,14 @@ async function doValidate(btn) {
     }
     closeSheet();
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    // « Poum » : tampon VALIDÉE sur l'ancien numéro, puis bascule vers le suivant
+    // « Poum » : tampon VALIDÉE (VALIDÉ pour un avoir) sur l'ancien numéro, puis bascule vers la facture suivante
     const tk = $('#ticket');
+    const stamp = tk.querySelector('.stamp'); if (stamp) stamp.textContent = credit ? 'VALIDÉ' : 'VALIDÉE';
     tk.classList.remove('poum', 'unpoum'); void tk.offsetWidth; tk.classList.add('poum');
     const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     setTimeout(() => {
       S.invoices = [inv].concat(S.invoices.filter(x => x.number !== inv.number));
-      renderEditor(); renderTicket(true);
+      renderEditor(); renderTicket(credit ? 'credit' : true);
     }, reduce ? 0 : 760);
     setTimeout(() => openSuccess(inv), reduce ? 50 : 1350);
     setTimeout(() => { tk.classList.remove('poum'); tk.classList.add('unpoum'); setTimeout(() => tk.classList.remove('unpoum'), 500); }, 2800);
@@ -2753,7 +2986,25 @@ async function doValidate(btn) {
     if (btn) { btn.disabled = false; btn.innerHTML = ic('check') + 'Réessayer'; }
   } finally { S.busy = false; }
 }
+// Avoir validé : envoi et PDF ; s'il annule toute la facture, on propose de la refaire corrigée
+function openCreditSuccess(credit) {
+  const n = credit.creditOf && credit.creditOf.number;
+  const orig = n ? findInv(n) : null;
+  const full = !!(orig && orig.status && orig.status.cancelledBy === credit.number);
+  const nxt = nextInfo('credit', K.todayISO());
+  openSheet('<div class="success"><div class="big">' + ic('check') + '</div><h2 id="sheet-title">Avoir ' + esc(credit.number) + ' validé</h2>' +
+    '<p>' + esc(credit.client.name) + ' · ' + esc(K.fmtMoney(credit.totals.ttc)) + '<br>' +
+    (orig ? (full ? 'La facture ' + esc(n) + ' est annulée.' : 'Avoir partiel : il reste ' + esc(K.fmtMoney(restOf(orig))) + ' à payer sur la facture ' + esc(n) + '.') + '<br>' : '') +
+    'Le prochain avoir sera le <span class="next">' + esc(nxt.number) + '</span>.</p></div>' +
+    '<div class="grid">' +
+    '<button type="button" class="btn primary block" data-act="send" data-n="' + esc(credit.number) + '" autofocus>' + ic('send') + 'Envoyer l’avoir</button>' +
+    '<button type="button" class="btn block" data-act="pdf" data-n="' + esc(credit.number) + '">' + ic('dl') + 'Enregistrer le PDF</button>' +
+    (full ? '<button type="button" class="btn block" data-act="dup" data-n="' + esc(n) + '">' + ic('dup') + 'Refaire une facture corrigée</button>' : '') +
+    '<button type="button" class="btn ghost block" data-act="close">Fermer</button></div>');
+  warmPdf(credit, false);
+}
 function openSuccess(inv) {
+  if (inv.kind === 'credit') { openCreditSuccess(inv); return; }
   const nxt = nextInfo('invoice', K.todayISO());
   openSheet('<div class="success"><div class="big">' + ic('check') + '</div><h2 id="sheet-title">Facture ' + esc(inv.number) + ' validée</h2>' +
     '<p>' + esc(inv.client.name) + ' · ' + esc(K.fmtMoney(inv.totals.ttc)) + '<br>La prochaine sera la <span class="next">' + esc(nxt.number) + '</span>.</p></div>' +
@@ -2834,7 +3085,8 @@ function openSend(n, mode) {
   const st = inv.status || {};
   const reminder = mode === 'reminder' && inv.kind !== 'credit';
   const count = (Number(st.reminders) || 0) + 1;
-  const m = reminder ? K.buildReminderMail(inv, settings(), count) : K.buildMail(inv, settings());
+  // Relance : le reste dû, si un avoir partiel a réduit la facture
+  const m = reminder ? K.buildReminderMail(inv, settings(), count, { due: restOf(inv) }) : K.buildMail(inv, settings());
   const to = clientEmailFor(inv);
   const card = clientCardFor(inv);
   const me = T(settings().email);
@@ -2899,7 +3151,7 @@ function openSend(n, mode) {
   const title = reminder
     ? (count === 1 ? 'Relancer la facture ' : K.reminderLabel(count) + ' de la facture ') + esc(inv.number)
     : 'Envoyer ' + doc + ' ' + esc(inv.number);
-  const sub = esc(inv.client.name) + ' · ' + esc(K.fmtMoney(inv.totals.ttc)) + (reminder ? ' · ' + (inv.term === 'reception' ? 'payable à réception' : 'échue le ' + esc(K.fmtDate(inv.dueDate))) : '');
+  const sub = esc(inv.client.name) + ' · ' + esc(K.fmtMoney(reminder ? restOf(inv) : inv.totals.ttc)) + (reminder ? ' · ' + (inv.term === 'reception' ? 'payable à réception' : 'échue le ' + esc(K.fmtDate(inv.dueDate))) : '');
   openSheet(sheetHead(title, sub) + '<div class="stepper">' + steps + '</div>');
   updateMailLinks();
   warmPdf(inv, paid);
@@ -2981,9 +3233,9 @@ function renderList() {
   if (!years.includes(S.year)) S.year = years[0];
   const yi = yearInvoices(S.year);
   const billed = yi.reduce((a, i) => a + (i.totals ? i.totals.ttc : 0), 0);
-  const cashed = S.invoices.filter(i => i.kind !== 'credit' && i.status && i.status.paidAt && yearOf(i.status.paidAt) === S.year).reduce((a, i) => a + i.totals.ttc, 0);
+  const cashed = S.invoices.filter(i => i.kind !== 'credit' && i.status && i.status.paidAt && yearOf(i.status.paidAt) === S.year).reduce((a, i) => a + paidAmountOf(i), 0);
   const open = S.invoices.filter(i => ['todo', 'sent', 'late'].includes(statusOf(i)));
-  const openSum = open.reduce((a, i) => a + i.totals.ttc, 0);
+  const openSum = open.reduce((a, i) => a + restOf(i), 0);
   const late = open.filter(i => statusOf(i) === 'late');
   const counts = { all: yi.length };
   ['todo', 'sent', 'late', 'paid', 'cancel', 'credit'].forEach(s => { counts[s] = yi.filter(i => statusOf(i) === s).length; });
@@ -3013,7 +3265,7 @@ function renderList() {
 function recettesHTML() {
   const y = S.year;
   const months = Array.from({ length: 12 }, () => 0);
-  S.invoices.forEach(i => { if (i.kind !== 'credit' && i.status && i.status.paidAt && yearOf(i.status.paidAt) === y) months[Number(i.status.paidAt.slice(5, 7)) - 1] += i.totals.ttc; });
+  S.invoices.forEach(i => { if (i.kind !== 'credit' && i.status && i.status.paidAt && yearOf(i.status.paidAt) === y) months[Number(i.status.paidAt.slice(5, 7)) - 1] += paidAmountOf(i); });
   const total = months.reduce((a, b) => a + b, 0);
   let rows = '';
   for (let q = 0; q < 4; q++) {
@@ -3037,9 +3289,13 @@ function openDetail(n) {
   if (st.sentAt) tl.push('<li>Envoyée le <b>' + esc(K.fmtDate(st.sentAt)) + '</b></li>');
   if (st.remindedAt) tl.push('<li>Relancée le <b>' + esc(K.fmtDate(st.remindedAt)) + '</b>' + (Number(st.reminders) > 1 ? ' (' + Number(st.reminders) + ' relances)' : '') + '</li>');
   if (!isCredit && !st.paidAt && !st.cancelledBy) tl.push('<li>Échéance <b>' + esc(K.dueShort(inv)) + '</b></li>');
-  if (st.paidAt) tl.push('<li>Payée le <b>' + esc(K.fmtDate(st.paidAt)) + '</b>' + (st.paidMethod ? ' · ' + esc(K.methodLabel(st.paidMethod)) : '') + '</li>');
+  if (st.paidAt) tl.push('<li>Payée le <b>' + esc(K.fmtDate(st.paidAt)) + '</b>' + (st.paidMethod ? ' · ' + esc(K.methodLabel(st.paidMethod)) : '') +
+    (Number.isFinite(st.paidAmount) && st.paidAmount !== inv.totals.ttc ? ' · ' + esc(K.fmtMoney(st.paidAmount)) : '') + '</li>');
+  // Avoirs partiels faits sur cette facture, puis ce qu'il reste à payer
+  if (!isCredit) creditsOf(n).filter(c => c.number !== st.cancelledBy).forEach(c => tl.push('<li>Avoir <b>' + esc(c.number) + '</b> : ' + esc(K.fmtMoney(c.totals.ttc)) + '</li>'));
   if (st.cancelledBy) tl.push('<li>Annulée par l’avoir <b>' + esc(st.cancelledBy) + '</b></li>');
-  if (isCredit && inv.creditOf) tl.push('<li>Annule la facture <b>' + esc(inv.creditOf.number) + '</b></li>');
+  else if (!isCredit && creditedOf(n) > 0) tl.push('<li>Reste dû <b>' + esc(K.fmtMoney(restOf(inv))) + '</b></li>');
+  if (isCredit && inv.creditOf) tl.push('<li>' + (inv.creditOf.full === false ? 'Avoir partiel sur la facture ' : 'Annule la facture ') + '<b>' + esc(inv.creditOf.number) + '</b></li>');
   const w = canWrite();
   const acts = [];
   const remind = '<button type="button" class="btn' + (s === 'late' && st.sentAt ? ' primary' : '') + '" data-act="remind" data-n="' + esc(n) + '">' + ic('send') + 'Relancer</button>';
@@ -3063,7 +3319,8 @@ function openDetail(n) {
 function openPay(n) {
   const inv = findInv(n); if (!inv) return;
   const ms = (inv.methods && inv.methods.length ? inv.methods : K.METHODS.map(m => m.id));
-  openSheet(sheetHead('Paiement reçu', esc(inv.number) + ' · ' + esc(inv.client.name) + ' · ' + esc(K.fmtMoney(inv.totals.ttc))) +
+  const rest = restOf(inv);
+  openSheet(sheetHead('Paiement reçu', esc(inv.number) + ' · ' + esc(inv.client.name) + ' · ' + esc(K.fmtMoney(rest)) + (rest < inv.totals.ttc ? ' (après avoir)' : '')) +
     '<div class="grid">' + field('Date d’encaissement', '<input type="date" id="pay-date" value="' + K.todayISO() + '">') +
     '<div class="field"><span>Moyen de paiement</span><div class="chips" id="pay-m">' + ms.map((m, i) => '<button type="button" class="chip" data-act="pay-m" data-v="' + m + '" aria-pressed="' + (i === 0) + '">' + esc(K.methodLabel(m)) + '</button>').join('') + '</div></div>' +
     '<button type="button" class="btn primary block" data-act="pay-ok" data-n="' + esc(n) + '">' + ic('check') + 'Enregistrer le paiement</button></div>');
@@ -3071,10 +3328,12 @@ function openPay(n) {
 function openCredit(n) {
   const inv = findInv(n); if (!inv) return;
   const info = nextInfo('credit', K.todayISO());
+  const rest = restOf(inv);
   openSheet(sheetHead('Annuler par un avoir', 'Une facture validée ne se supprime pas : on l’annule par un avoir, qui reprend ses montants en négatif.') +
     '<div class="grid">' + field('Motif (apparaît sur l’avoir, facultatif)', '<input type="text" id="cr-why" placeholder="Ex. Erreur sur le nombre de séances">') +
-    '<div class="banner info" style="margin:0">' + ic('file') + '<div>L’avoir <b>' + esc(info.number) + '</b> annulera la facture <b>' + esc(n) + '</b> (' + esc(K.fmtMoney(inv.totals.ttc)) + '). Tu pourras ensuite la dupliquer pour refaire une facture correcte.</div></div>' +
-    '<div class="btn-row"><button type="button" class="btn" data-act="close">Retour</button><button type="button" class="btn primary" style="flex:1" data-act="credit-ok" data-n="' + esc(n) + '">' + ic('undo') + 'Créer l’avoir ' + esc(info.number) + '</button></div></div>');
+    '<div class="banner info" style="margin:0">' + ic('file') + '<div>L’avoir <b>' + esc(info.number) + '</b> annulera la facture <b>' + esc(n) + '</b> (' + esc(K.fmtMoney(rest)) + (rest < inv.totals.ttc ? ' restant après les avoirs déjà faits' : '') + '). Tu pourras ensuite la dupliquer pour refaire une facture correcte.</div></div>' +
+    '<div class="btn-row"><button type="button" class="btn" data-act="close">Retour</button><button type="button" class="btn primary" style="flex:1" data-act="credit-ok" data-n="' + esc(n) + '">' + ic('undo') + 'Créer l’avoir ' + esc(info.number) + '</button></div>' +
+    '<p class="hint" style="margin:0;text-align:center">Pour n’annuler qu’une partie (une séance sur quatre…), <button type="button" class="linklike" data-act="credit-part" data-n="' + esc(n) + '">fais un avoir partiel</button>.</p></div>');
 }
 async function doCredit(n, btn) {
   if (S.busy || !canWrite()) return;
@@ -3085,22 +3344,22 @@ async function doCredit(n, btn) {
     const t = K.todayISO();
     const nowIso = new Date().toISOString();
     const why = ($('#cr-why') && $('#cr-why').value.trim()) || '';
+    // Toute la facture, ou seulement ce qui reste dû si des avoirs partiels ont déjà été faits
+    const tmp = {}; fillCreditLines(tmp, orig);
+    const lines = tmp.lines.map(l => ({ label: l.label, detail: l.detail, qty: l.qty, unit: l.unit }));
     const credit = await write(() => claimNumber('credit', t, info => ({
       kind: 'credit', number: info.number, series: info.series, seq: info.seq, issueDate: t,
       service: clone(orig.service), term: 'reception', dueDate: t, client: clone(orig.client), clientId: orig.clientId || null,
-      lines: clone(orig.lines), vat: clone(orig.vat), methods: [], notes: why, thanks: '',
+      lines, vat: clone(orig.vat), methods: [], notes: why, thanks: '',
       seller: sellerSnapshot(st), insurance: clone(st.insurance), terms: clone(orig.terms || {}),
-      totals: K.computeTotals(orig.lines, orig.vat, -1), creditOf: { number: orig.number, date: orig.issueDate },
+      totals: K.computeTotals(lines, orig.vat, -1), creditOf: { number: orig.number, date: orig.issueDate, full: true },
       status: {}, createdAt: nowIso, validatedAt: nowIso
     })));
     await write(() => S.db.doc('invoices/' + orig.number).update({ status: { cancelledBy: credit.number, cancelledAt: t } }));
     orig.status = Object.assign({}, orig.status, { cancelledBy: credit.number, cancelledAt: t });
     S.invoices = [credit].concat(S.invoices.filter(x => x.number !== credit.number));
     renderAll();
-    openSheet('<div class="success"><div class="big">' + ic('check') + '</div><h2 id="sheet-title">Avoir ' + esc(credit.number) + ' créé</h2><p>La facture ' + esc(orig.number) + ' est annulée.</p></div>' +
-      '<div class="grid"><button type="button" class="btn primary block" data-act="send" data-n="' + esc(credit.number) + '">' + ic('send') + 'Envoyer l’avoir</button>' +
-      '<button type="button" class="btn block" data-act="dup" data-n="' + esc(orig.number) + '">' + ic('dup') + 'Refaire une facture corrigée</button>' +
-      '<button type="button" class="btn ghost block" data-act="close">Fermer</button></div>');
+    openCreditSuccess(credit);
   } catch (e) { toast(dbMsg(e)); if (btn) { btn.disabled = false; btn.textContent = 'Réessayer'; } }
   finally { S.busy = false; }
 }
@@ -3126,7 +3385,7 @@ function exportRecettes() {
   const paid = S.invoices.filter(i => i.kind !== 'credit' && i.status && i.status.paidAt && yearOf(i.status.paidAt) === y)
     .sort((a, b) => a.status.paidAt.localeCompare(b.status.paidAt) || a.seq - b.seq);
   let tot = 0;
-  paid.forEach(i => { tot += i.totals.ttc; rows.push([K.fmtDate(i.status.paidAt), i.number, K.fmtDate(i.issueDate), i.client.name, i.lines.map(l => l.label).join(' / '), K.methodLabel(i.status.paidMethod || ''), K.csvMoney(i.totals.ttc)]); });
+  paid.forEach(i => { const amt = paidAmountOf(i); tot += amt; rows.push([K.fmtDate(i.status.paidAt), i.number, K.fmtDate(i.issueDate), i.client.name, i.lines.map(l => l.label).join(' / '), K.methodLabel(i.status.paidMethod || ''), K.csvMoney(amt)]); });
   rows.push(['', '', '', '', '', 'Total', K.csvMoney(tot)]);
   saveFile('Livre-des-recettes_' + y + '.csv', K.toCSV(rows));
 }
@@ -3229,7 +3488,7 @@ function renderClients() {
   box.innerHTML = list.length ? list.map(c => {
     const n = S.invoices.filter(i => i.clientId === c.id && i.kind !== 'credit').length;
     const open = S.invoices.filter(i => i.clientId === c.id && ['todo', 'sent', 'late'].includes(statusOf(i)));
-    const due = open.reduce((a, i) => a + i.totals.ttc, 0);
+    const due = open.reduce((a, i) => a + restOf(i), 0);
     const late = open.some(i => statusOf(i) === 'late');
     return '<div class="ccard"><div style="min-width:0"><b>' + esc(c.name) + '</b><span>' + (c.type === 'pro' ? 'Professionnel' : 'Particulier') + (c.address && c.address.city ? ' · ' + esc(c.address.city) : '') + (n ? ' · ' + n + ' facture' + (n > 1 ? 's' : '') : '') + '</span>' + (c.email ? '<br><span>' + esc(c.email) + '</span>' : '') +
       (due ? '<br><span class="' + (late ? 'due' : '') + '">' + K.fmtMoney(due) + ' à encaisser' + (late ? ' · en retard' : '') + '</span>' : '') + '</div>' +
@@ -3580,8 +3839,11 @@ document.addEventListener('click', e => {
       renderLines(); onDraftChanged(false); toast('Ligne ajoutée'); break;
     }
     case 'client-clear': saveDraftClientNow(); d.clientId = null; d.clientNew = false; d.client = blankClient(); onDraftChanged(true); break;
+    case 'kind': switchKind(v); break;
+    case 'credit-all': { const orig = d.creditOf && findInv(d.creditOf.number); if (orig) { fillCreditLines(d, orig); onDraftChanged(true); } break; }
+    case 'credit-part': startCredit(n); break;
     case 'preview': {
-      const info = nextInfo('invoice', d.issueDate);
+      const info = nextInfo(d.kind === 'credit' ? 'credit' : 'invoice', d.issueDate);
       openSheet(sheetHead('Aperçu', 'Mise en page du PDF · le numéro ' + esc(info.number) + ' sera attribué à la validation') + '<div id="pv-sheet"></div><div class="btn-row" style="margin-top:14px"><button type="button" class="btn" data-act="close">Continuer à modifier</button><button type="button" class="btn primary" style="flex:1" data-act="validate">' + ic('check') + 'Enregistrer…</button></div>');
       renderPreview(); break;
     }
@@ -3636,10 +3898,11 @@ document.addEventListener('click', e => {
     case 'pay-ok': {
       const sel = $('#pay-m [aria-pressed="true"]');
       const date = $('#pay-date').value || K.todayISO();
-      setStatus(n, { paidAt: date, paidMethod: sel ? sel.dataset.v : '' }, 'Paiement enregistré').then(ok => { if (ok) { closeSheet(); openDetail(n); } });
+      // Montant encaissé : le reste dû, avoirs partiels déduits (livre des recettes et Urssaf)
+      setStatus(n, { paidAt: date, paidMethod: sel ? sel.dataset.v : '', paidAmount: restOf(findInv(n)) }, 'Paiement enregistré').then(ok => { if (ok) { closeSheet(); openDetail(n); } });
       break;
     }
-    case 'unpay': setStatus(n, { paidAt: null, paidMethod: null }, 'Paiement retiré').then(ok => { if (ok) { closeSheet(); openDetail(n); } }); break;
+    case 'unpay': setStatus(n, { paidAt: null, paidMethod: null, paidAmount: null }, 'Paiement retiré').then(ok => { if (ok) { closeSheet(); openDetail(n); } }); break;
     case 'dup': duplicate(n); break;
     case 'credit': closeSheet(); openCredit(n); break;
     case 'credit-ok': doCredit(n, a); break;
@@ -3724,6 +3987,8 @@ document.addEventListener('change', e => {
   if (t.type === 'checkbox') { onField(e); return; }
   // Adresse tapée au moment d'envoyer : gardée dans la fiche client pour les prochaines fois
   if (t.id === 'm-to') { rememberClientEmail(S.sendInvoice, t.value.trim()); return; }
+  // Avoir : la facture corrigée est choisie, son client et ses lignes sont repris
+  if (t.id === 'cr-of') { chooseCreditOf(t.value); onDraftChanged(true); return; }
   if (t.id === 'client-select') {
     const c = S.clients.find(x => x.id === t.value);
     saveDraftClientNow(); // le client tapé jusqu'ici garde sa fiche

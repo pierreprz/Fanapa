@@ -117,6 +117,12 @@ test('relance courtoise ; pénalités rappelées aux professionnels à partir de
   assert.match(r2.body, /indemnité forfaitaire pour frais de recouvrement de 40 €/);
   assert.equal(K.reminderLabel(3), '3e relance');
 });
+test('avoir total ou partiel ; relance au reste dû après avoir', () => {
+  assert.match(K.creditText({ creditOf: { number: 'FA-2026-001' } }, ' '), /^Cet avoir annule la facture n° FA-2026-001\. Son montant/);
+  assert.match(K.creditText({ creditOf: { number: 'FA-2026-001', full: false } }, ' '), /^Cet avoir annule partiellement la facture n° FA-2026-001\./);
+  assert.match(K.buildReminderMail(base, { mail: {} }, 1, { due: 18500 }).body, /d’un montant de 230,00 € \(reste dû après avoir : 185,00 €\), payable à réception/);
+  assert.doesNotMatch(K.buildReminderMail(base, { mail: {} }, 1, { due: 23000 }).body, /reste dû/, 'sans avoir : rien de plus');
+});
 test('CSV sans formule involontaire', () => {
   const csv = K.toCSV([['=SOMME(A1)', '-240,00', 'a;b']]);
   assert.ok(csv.includes("'=SOMME(A1)") && csv.includes(';-240,00;') && csv.includes('"a;b"'));

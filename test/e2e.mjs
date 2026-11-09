@@ -617,6 +617,108 @@ try {
   assert.equal(await p6.isChecked('#m-cc'), true, 'choix « copie » mémorisé');
   await p6.click('.sheet [data-act="close"]');
   step('envoi : destinataire repris de la fiche client, adresse tapée à l’envoi gardée dans la fiche, « Me mettre en copie » mémorisé');
+
+  /* ================= 7. Facture ou avoir depuis « Nouvelle » : bandeau, avoir partiel, plafond, solde ================= */
+  const ctx7 = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'fr-FR', acceptDownloads: true });
+  const p7 = await ctx7.newPage();
+  watch(p7, '[7]');
+  const store7 = storeOf(p7);
+  const t7 = async sel => (await p7.textContent(sel)).replace(/\s+/g, ' '); // espaces insécables des montants
+  const until7 = async cond => { for (let i = 0; i < 50 && !(await cond()); i++) await p7.waitForTimeout(100); };
+  await p7.goto(`${BASE}/index.html#factures`);
+  await ready(p7);
+  await fillStructure(p7);
+  await newInvoice(p7, { name: 'Mme Léa Moreau', line1: '3 rue Pasteur', email: 'lea@exemple.fr', qty: 4 }); // 4 × 45 = 180 €
+  await p7.click('.sheet [data-act="close"]');
+  const FA1 = `FA-${YEAR}-001`, FA2 = `FA-${YEAR}-002`, AV1 = `AV-${YEAR}-001`, AV2 = `AV-${YEAR}-002`, AV3 = `AV-${YEAR}-003`;
+  // Le choix Facture / Avoir change le bandeau et sa numérotation
+  assert.equal(await p7.getAttribute('#kind-seg [data-v="invoice"]', 'aria-pressed'), 'true');
+  assert.equal(await ticket(p7), FA2);
+  assert.match(await t7('#tk-eyebrow'), /Nouvelle facture/);
+  await p7.click('#kind-seg [data-v="credit"]');
+  await p7.waitForFunction(() => document.querySelector('#ticket').classList.contains('credit'));
+  assert.equal(await ticket(p7), AV1, 'série des avoirs');
+  assert.match(await t7('#tk-eyebrow'), /Nouvel avoir/);
+  assert.equal(await p7.getAttribute('#kind-seg [data-v="credit"]', 'aria-pressed'), 'true');
+  await p7.evaluate(() => window.scrollTo(0, 0));
+  await p7.waitForTimeout(400);
+  await p7.screenshot({ path: join(OUT, '15a-nouvel-avoir.png') });
+  // Avoir partiel : facture choisie, client et lignes repris ; une séance sur quatre
+  await p7.selectOption('#cr-of', FA1);
+  await p7.waitForSelector('.cr-client');
+  assert.match(await t7('.cr-client'), /Mme Léa Moreau/);
+  assert.equal(await p7.inputValue('.line [data-l="qty"]'), '4');
+  await p7.fill('.line [data-l="qty"]', '1');
+  await blur(p7);
+  await p7.waitForFunction(() => document.querySelector('#tb-total').textContent.replace(/\s/g, ' ') === '−45,00 €');
+  assert.match(await t7('#tb-mention'), new RegExp('Avoir partiel sur la facture ' + FA1));
+  await p7.waitForTimeout(400);
+  await p7.screenshot({ path: join(OUT, '15-avoir-partiel.png') });
+  await p7.click('#btn-validate');
+  await p7.waitForSelector('[data-act="confirm-validate"]');
+  assert.match(await t7('.sheet'), new RegExp('avoir partiel sur la facture ' + FA1));
+  await p7.click('[data-act="confirm-validate"]');
+  await p7.waitForSelector('.success');
+  assert.match(await t7('.success'), new RegExp('Avoir ' + AV1 + ' validé'));
+  assert.match(await t7('.success'), /il reste 135,00 € à payer/);
+  const av1 = await store7('invoices/' + AV1);
+  assert.equal(av1.kind, 'credit');
+  assert.equal(av1.totals.ttc, -4500);
+  assert.deepEqual([av1.creditOf.number, av1.creditOf.full], [FA1, false]);
+  assert.ok(!((await store7('invoices/' + FA1)).status || {}).cancelledBy, 'un avoir partiel n’annule pas la facture');
+  await p7.click('.sheet [data-act="close"]');
+  assert.equal(await ticket(p7), FA2, 'après un avoir, l’éditeur repart sur une facture');
+  // La fiche de la facture montre l'avoir et le reste dû
+  await p7.click('.tabs [data-go="factures"]');
+  await p7.click(`.row[data-n="${FA1}"]`);
+  assert.match(await t7('.sheet .timeline'), new RegExp('Avoir ' + AV1));
+  assert.match(await t7('.sheet .timeline'), /Reste dû 135,00 €/);
+  // Un avoir ne dépasse jamais ce qui reste : la facture est soldée par un 2e avoir de 135 €
+  await p7.click('.sheet [data-act="credit"]');
+  await p7.click('.sheet [data-act="credit-part"]');                // « fais un avoir partiel » : éditeur d'avoir, facture choisie
+  await p7.waitForSelector('#cr-of');
+  assert.equal(await p7.inputValue('#cr-of'), FA1);
+  assert.equal(await p7.inputValue('.line [data-l="unit"]'), '135', 'proposé : le solde de la facture');
+  await p7.fill('.line [data-l="unit"]', '150');
+  await blur(p7);
+  await p7.click('#btn-validate');
+  await p7.waitForSelector('.checklist');
+  assert.match(await t7('.sheet'), /Il manque quelques mentions/);
+  assert.match(await t7('.checklist'), /Au plus 135,00 € sur la facture/);
+  assert.equal(await p7.$('[data-act="confirm-validate"]'), null, 'validation impossible au-delà du reste');
+  await p7.click('.sheet [data-act="close"]');
+  await p7.click('[data-act="credit-all"]');                        // « Toute la facture » : le solde, 135 €
+  await p7.waitForFunction(() => document.querySelector('#tb-total').textContent.replace(/\s/g, ' ') === '−135,00 €');
+  await p7.click('#btn-validate');
+  await p7.click('[data-act="confirm-validate"]');
+  await p7.waitForSelector('.success');
+  assert.match(await t7('.success'), new RegExp('La facture ' + FA1 + ' est annulée'));
+  assert.equal((await store7('invoices/' + FA1)).status.cancelledBy, AV2);
+  assert.equal((await store7('invoices/' + AV2)).creditOf.full, true);
+  await p7.click('.sheet [data-act="close"]');
+  // Paiement après un avoir partiel : seul le reste dû est encaissé (livre des recettes, Urssaf)
+  await newInvoice(p7, { name: 'M. Hugo Petit', line1: '9 rue Victor Hugo', email: 'hugo@exemple.fr', qty: 2 }); // 90 €
+  await p7.click('.sheet [data-act="close"]');
+  await p7.click('#kind-seg [data-v="credit"]');
+  await p7.selectOption('#cr-of', FA2);
+  await p7.fill('.line [data-l="qty"]', '1');
+  await blur(p7);
+  await p7.click('#btn-validate');
+  await p7.click('[data-act="confirm-validate"]');
+  await p7.waitForSelector('.success');
+  assert.equal((await store7('invoices/' + AV3)).totals.ttc, -4500);
+  await p7.click('.sheet [data-act="close"]');
+  await p7.click('.tabs [data-go="factures"]');
+  await p7.click(`.row[data-n="${FA2}"]`);
+  await p7.click('.sheet [data-act="pay"]');
+  assert.match(await t7('.sheet-h'), /45,00 € \(après avoir\)/);
+  await p7.click('[data-act="pay-ok"]');
+  await until7(async () => ((await store7('invoices/' + FA2)).status || {}).paidAmount === 4500);
+  assert.equal((await store7('invoices/' + FA2)).status.paidAmount, 4500, 'encaissé : 90 € − 45 € d’avoir');
+  await p7.click('.sheet [data-act="close"]');
+  assert.match(await t7('.recettes'), /45,00 €/);
+  assert.doesNotMatch(await t7('.recettes'), /90,00 €/);
+  step('Nouvelle : choix Facture / Avoir (bandeau et numérotation AV), avoir partiel, plafond au reste dû, solde qui annule la facture, encaissement après avoir');
 } finally {
   await browser.close();
   server.close();

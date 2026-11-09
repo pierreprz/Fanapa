@@ -12,8 +12,11 @@ Appli de facturation pour FAN'APA, micro-entreprise d'activité physique adapté
   verrouillés, pour ne jamais oublier la pièce jointe), puis « Ouvrir Gmail » ouvre un nouveau
   mail avec l'adresse du client (reprise de sa fiche), l'objet et le message mis en forme ; on y
   joint le PDF avec le trombone 📎. Sur ordinateur, e-mail pré-rempli (Gmail, Mail, Outlook) ;
-- suivi des paiements, **relances** des factures en retard, avoirs, PDF « facture acquittée » pour
-  les mutuelles ;
+- **facture ou avoir** au choix dans « Nouvelle » (bandeau et numérotation FA ou AV qui suivent) ;
+  un avoir corrige toujours une facture validée, en totalité ou en partie (une séance sur quatre…),
+  et les encaissements tiennent compte du reste dû ;
+- suivi des paiements, **relances** des factures en retard, PDF « facture acquittée » pour les
+  mutuelles ;
 - livre des recettes et registre des factures en CSV, encaissements par trimestre pour l'Urssaf ;
 - « Ma structure » (nom, SIRET, adresse…) et les **clients s'enregistrent tout seuls** pendant la
   saisie, y compris un nouveau client tapé dans une facture pas encore validée ;

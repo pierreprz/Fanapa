@@ -43,6 +43,23 @@ tutoiement ; tout ce que voit le client final (PDF, e-mails, relances) est au vo
   passe par `cleanDraftDoc()`. Si le brouillon ouvert disparaît (validé ou supprimé sur un autre
   appareil), l'éditeur se referme au lieu de le recréer. « Nouvelle facture » range d'abord la
   facture en cours dans les brouillons (`parkDraft()`). Les brouillons sont dans la sauvegarde.
+- **Facture ou avoir** : sélecteur `#kind-seg` au-dessus du bandeau (`switchKind()`, ce qui était en
+  cours part dans les brouillons) ; le brouillon porte `kind` ('invoice' | 'credit') et, pour un
+  avoir, `creditOf { number, date }` (`blankDraft(kind)`). Le bandeau (`renderTicket`) prend la
+  série et la couleur de l'avoir (`.ticket.credit`, « Nouvel avoir · AV-… »). Éditeur d'avoir
+  (`renderCreditEditor`) : ① facture concernée OBLIGATOIRE (`#cr-of`, `creditableInvoices()` :
+  validées, non annulées, reste > 0 ; `chooseCreditOf()` reprend client, prestation et lignes),
+  ② montants (tout ou partie ; « Toute la facture » = `fillCreditLines()`, une ligne « Solde »
+  si des avoirs existent déjà), ③ motif (`notes`). `creditChecks()` : référence à la facture,
+  montant > 0 et ≤ `restOf(facture)`, date ≥ celle de la facture et du dernier avoir.
+  `creditDraftToInvoice()` reprend TVA et conditions de la facture, `creditOf.full` = l'avoir
+  couvre tout le reste (sinon avoir partiel, texte `K.creditText`). À la validation (série AV via
+  `claimNumber('credit')`), un avoir total met `cancelledBy`/`cancelledAt` sur la facture ; un
+  avoir partiel ne la touche pas (`creditsOf`, `creditedOf`, `restOf` recalculent le reste dû).
+  Depuis la fiche d'une facture : « Annuler par un avoir » (`doCredit`, le reste dû) ou « avoir
+  partiel » (`startCredit`). Paiement : `status.paidAmount` = reste dû au moment du paiement ;
+  encaissements, livre des recettes et Urssaf utilisent `paidAmountOf()`, les montants à encaisser
+  `restOf()`, la relance le reste dû (`buildReminderMail(…, { due })`).
 - Préférences locales (localStorage, par appareil) : `fanapa.draft.v1` (brouillon),
   `fanapa.backup.v1` (date de la dernière sauvegarde exportée), `fanapa.backup.snooze`,
   `fanapa.install.snooze`, `fanapa.transfer.snooze`, `fanapa.mail.cc` (« Me mettre en copie »),
@@ -128,8 +145,9 @@ tutoiement ; tout ce que voit le client final (PDF, e-mails, relances) est au vo
    `normalizeSettings()` conserve la numérotation enregistrée. Un brouillon n'a pas de numéro.
    Aucune suppression de facture.
 2. Facture validée immuable : seul `status` évolue (`sentAt`, `remindedAt`, `reminders`,
-   `paidAt`, `paidMethod`, `cancelledBy`, `cancelledAt`). Corriger = avoir (`kind: 'credit'`,
-   série AV, `creditOf`).
+   `paidAt`, `paidMethod`, `paidAmount`, `cancelledBy`, `cancelledAt`). Corriger = avoir
+   (`kind: 'credit'`, série AV, `creditOf { number, date, full }`), total ou partiel, jamais
+   au-delà du reste dû ; un avoir est lui aussi immuable une fois validé.
 3. Chaque facture stocke un instantané de tout ce qu'elle affiche (`seller`, `client`,
    `vat`, `terms`, `insurance`, `totals`) : ne jamais réafficher une facture passée à partir
    des réglages courants.
