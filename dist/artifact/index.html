@@ -398,8 +398,14 @@ body.v-nouvelle main { padding-bottom: calc(var(--tabbar) + var(--safe-b) + 96px
 .addr { font-size: 13px; color: var(--muted); word-break: break-all; }
 #stp-mail #mail-links .btn:not(.block) { flex: 1; }
 .stp #mail-links + .addr { margin-top: 8px; }
+.stp p.or { margin: 18px 0 10px; color: var(--ink); font-weight: 500; font-size: 13.5px; }
+.subs { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; counter-reset: sub; }
+.subs > li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: start; }
+.subs > li::before { counter-increment: sub; content: counter(sub, lower-alpha); width: 24px; height: 24px; margin-top: 10px; border-radius: 50%; background: var(--mist); color: var(--teal-deep); display: grid; place-items: center; font-family: var(--font-display); font-weight: 800; font-size: 12px; }
+.subs > li.done::before { content: '✓'; background: var(--ok); color: #fff; }
 .stp p.attach { margin: 10px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--mist); color: var(--ink); font-size: 13.5px; line-height: 1.45; }
 .stp p.attach b { font-weight: 600; word-break: break-word; }
+.stp .subs p.attach { margin: 0; }
 .success { text-align: center; padding: 6px 0 4px; }
 .success .big { width: 64px; height: 64px; border-radius: 50%; margin: 6px auto 10px; background: var(--ok-bg); color: var(--ok); display: grid; place-items: center; animation: pop .45s cubic-bezier(.2,1.5,.4,1); }
 .success .big svg.i { width: 34px; height: 34px; stroke-width: 2.4; }
@@ -2438,9 +2444,9 @@ function mailerOrder() {
 // iPhone : comment joindre le PDF enregistré dans Fichiers, selon la messagerie
 function attachHintHTML(mailer, file) {
   const f = '<b>' + esc(file) + '</b>';
-  if (mailer === 'mail') return 'Il reste à joindre le PDF : dans Mail, touche le texte du message, puis l’icône document dans la barre au-dessus du clavier, et choisis ' + f + '.';
-  if (mailer === 'outlook') return 'Il reste à joindre le PDF : dans Outlook, touche le trombone 📎, puis choisis ' + f + ' dans Fichiers.';
-  return 'Il reste à joindre la facture (Gmail ne la joint pas tout seul à un mail déjà rempli) : touche le trombone 📎 en haut, puis « Fichiers » (icône dossier), et choisis ' + f + ' dans « Récents ».';
+  if (mailer === 'mail') return 'Puis joins le PDF : dans Mail, touche le texte du message, puis l’icône document dans la barre au-dessus du clavier, et choisis ' + f + '.';
+  if (mailer === 'outlook') return 'Puis joins le PDF : dans Outlook, touche le trombone 📎, puis choisis ' + f + ' dans Fichiers.';
+  return 'Puis joins le PDF : dans Gmail, touche le trombone 📎 en haut, puis «&nbsp;Fichiers&nbsp;» (icône dossier), et choisis ' + f + ' dans «&nbsp;Récents&nbsp;».';
 }
 function renderAttachHint(mailer) {
   const el = $('#m-attach'); if (!el) return;
@@ -2501,24 +2507,30 @@ function openSend(n, mode) {
       (st.sentAt ? '<p><b>Envoyée le ' + esc(K.fmtDate(st.sentAt)) + '</b></p>' : '<button type="button" class="btn" data-act="mark-sent" data-n="' + esc(n) + '">' + ic('check') + 'Marquer comme envoyée</button>') + '</div></div>';
   let steps;
   if (ios) {
-    /* iPhone : « Ouvrir Gmail » (ou Mail, Outlook) ouvre un nouveau mail avec l'adresse du client, la copie,
-       l'objet et le message, retours à la ligne compris. Apple ne laisse pas une appli web remplir le
-       destinataire ET joindre un fichier : le PDF est enregistré d'abord dans Fichiers, puis joint avec le
-       trombone. Le partage direct (PDF joint, adresse à coller) reste proposé en dessous : Gmail y prend le
-       nom du fichier comme objet et perd les retours à la ligne du message. */
+    /* iPhone. Google ne permet pas de joindre un fichier à un mail ouvert tout rempli (googlegmail:///co),
+       et le menu de partage d'Apple, seul à pouvoir donner le PDF à Gmail, ne remplit pas le destinataire.
+       D'où deux façons, l'une sous l'autre :
+       - « Gmail avec la facture jointe » (appli autonome) : menu de partage, PDF joint, objet = nom du
+         fichier (shareFileName), adresse copiée à coller ; Gmail met le message en un seul paragraphe ;
+       - le mail tout prêt et mis en forme (adresse, copie, objet, message) : a. enregistrer la facture dans
+         Fichiers, b. ouvrir Gmail / Mail / Outlook, c. joindre la facture avec le trombone. */
+    const fav = mailerOrder()[0];
+    const favName = { gmail: 'Gmail', mail: 'Mail', outlook: 'Outlook' }[fav];
+    const jointe = inv.kind === 'credit' ? 'l’avoir joint' : 'la facture' + (paid ? ' acquittée' : '') + ' jointe';
+    const shareBox = share
+      ? '<button type="button" class="btn navy block" data-act="share-mail" data-n="' + esc(n) + '"' + dataPaid + '>' + ic('send') + esc(favName) + ' avec ' + jointe + '</button>' +
+        '<p class="hint" style="margin-top:8px">Dans le menu qui s’ouvre, touche <b>' + esc(favName) + '</b> : ' + doc + ' est jointe et l’objet rempli. L’adresse du client est copiée en même temps : touche «&nbsp;À&nbsp;», puis <b>Coller</b>.' +
+        (fav === 'gmail' ? ' Gmail met le message en un seul paragraphe.' : '') + '</p>' +
+        '<p class="or">Ou, pour un mail tout prêt et mis en forme, où tu joins ' + doc + ' toi-même :</p>'
+      : '<p>Le mail s’ouvre tout prêt (adresse, objet, message) ; il reste à y joindre ' + doc + '.</p>';
     steps = '<div class="stp"><div><h3>Vérifie le mail</h3>' + mailbox + '</div></div>' +
-      '<div class="stp" id="stp-pdf"><div><h3>Enregistre ' + doc + ' dans Fichiers</h3>' +
-      '<p>Dans le menu qui s’ouvre, choisis <b>Enregistrer dans Fichiers</b> (plus bas dans la liste), puis <b>Enregistrer</b>.</p>' +
-      '<button type="button" class="btn" data-act="send-pdf" data-n="' + esc(n) + '"' + dataPaid + '>' + ic('dl') + 'Enregistrer ' + doc + (paid ? ' acquittée' : '') + '</button>' +
-      '<p class="addr" style="margin:8px 0 0">' + esc(S.sendFile) + '</p></div></div>' +
-      '<div class="stp" id="stp-mail"><div><h3>Ouvre ta messagerie</h3>' +
-      '<p>Le mail s’ouvre prêt à partir : adresse du client, objet et message.</p>' +
-      '<div class="btn-row" id="mail-links"></div><p class="addr" id="m-addr"></p>' +
-      '<p class="attach" id="m-attach"></p>' +
-      (share ? '<details class="alt"><summary>Ou en un seul geste, PDF déjà joint</summary>' +
-        '<p class="hint" style="margin:0 0 8px">Le menu de partage ouvre ta messagerie avec ' + doc + ' jointe et le message. L’adresse est copiée en même temps : touche « À », puis <b>Coller</b>. Avec Gmail, le message y perd ses retours à la ligne.</p>' +
-        '<button type="button" class="btn" data-act="share-mail" data-n="' + esc(n) + '"' + dataPaid + '>' + ic('send') + '<span id="m-send-label">' + esc(to ? 'Envoyer à ' + to : 'Envoyer ' + doc) + '</span></button></details>' : '') +
-      '</div></div>' + done;
+      '<div class="stp" id="stp-send"><div><h3>Envoie ' + doc + '</h3>' + shareBox +
+      '<ol class="subs">' +
+      '<li id="stp-pdf"><div><button type="button" class="btn" data-act="send-pdf" data-n="' + esc(n) + '"' + dataPaid + '>' + ic('dl') + 'Enregistrer ' + doc + (paid ? ' acquittée' : '') + '</button>' +
+      '<p class="hint" style="margin-top:6px">Dans le menu, choisis <b>Enregistrer dans Fichiers</b> (plus bas dans la liste), puis <b>Enregistrer</b>. Fichier : ' + esc(S.sendFile) + '</p></div></li>' +
+      '<li id="stp-mail"><div><div class="btn-row" id="mail-links"></div><p class="addr" id="m-addr"></p></div></li>' +
+      '<li><p class="attach" id="m-attach"></p></li>' +
+      '</ol></div></div>' + done;
   } else if (share) {
     // Téléphone Android (version autonome) : « Envoyer à … » ouvre le partage avec le PDF joint, l'objet et le
     // message ; l'adresse est copiée au passage. Variante : messagerie avec l'adresse déjà remplie.
@@ -2561,9 +2573,11 @@ function updateMailLinks() {
     outlook: { href: isIOS ? L.outlookApp : L.outlook, label: 'Outlook', web: !isIOS }
   };
   const wide = !!$('#stp-mail'); // iPhone : grand bouton pour la messagerie préférée, les autres en dessous
+  // Un seul bouton plein par étape : s'il y a déjà « Gmail avec la facture jointe », celui-ci est en contour
+  const lead = wide && $('#stp-send [data-act="share-mail"]') ? ' block' : ' navy' + (wide ? ' block' : '');
   box.innerHTML = mailerOrder().map((k, i) => {
     const m = apps[k];
-    return '<a class="btn' + (i ? '' : ' navy' + (wide ? ' block' : '')) + '" data-mailer="' + k + '" href="' + esc(m.href) + '"' + (m.web ? ' target="_blank" rel="noopener"' : '') + '>' +
+    return '<a class="btn' + (i ? '' : lead) + '" data-mailer="' + k + '" href="' + esc(m.href) + '"' + (m.web ? ' target="_blank" rel="noopener"' : '') + '>' +
       ic(i ? (m.web ? 'ext' : 'mail') : 'send') + (i ? '' : 'Ouvrir ') + m.label + '</a>';
   }).join('');
   renderAttachHint();
@@ -3228,7 +3242,7 @@ document.addEventListener('click', e => {
       const su = $('#m-subject'), bo = $('#m-body'), to = $('#m-to');
       // Copie de l'adresse dans le même geste : il suffira de la coller dans « À »
       if (to && to.value.trim() && navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(to.value.trim()).catch(() => { });
-      shareInvoice(inv, !!a.dataset.paid, su ? su.value : '', bo ? bo.value : '').then(ok => { if (ok) { $$('#stp-pdf, #stp-mail').forEach(s => s.classList.add('done')); toast('Facture partagée'); } });
+      shareInvoice(inv, !!a.dataset.paid, su ? su.value : '', bo ? bo.value : '').then(ok => { if (ok) { const s = $('#stp-send') || $('#stp-pdf'); if (s) s.classList.add('done'); toast('Facture partagée'); } });
       break;
     }
     case 'mark-reminded': {

@@ -52,15 +52,19 @@ tutoiement ; tout ce que voit le client final (PDF, e-mails, relances) est au vo
   pas la facture). Une adresse tapée dans « À » est enregistrée dans la fiche si elle n'en a pas
   (`rememberClientEmail`, jamais d'écrasement). Liens Gmail / Mail / Outlook (`mailLinks`) avec
   `cc` si « Me mettre en copie », dans l'ordre de `mailerOrder()`. **iPhone / iPad** (`isIOS`) :
-  ① vérifier le mail, ② « Enregistrer la facture » dans Fichiers, ③ « Ouvrir Gmail » ouvre
-  l'APPLI Gmail (`googlegmail:///co?to=&cc=&subject=&body=`, corps en CRLF ; le lien web
-  mail.google.com n'ouvre sur iPhone que la boîte de réception), Mail = `mailto:` (messagerie par
-  défaut), Outlook = `ms-outlook://compose?…` ; puis joindre le PDF avec le trombone
-  (`attachHintHTML`, nom du fichier rappelé). Apple ne laisse pas une appli web remplir le
-  destinataire ET joindre un fichier. Variante repliée « en un seul geste » (`share-mail`,
-  appli autonome) : partage du PDF + message, adresse copiée à coller ; Gmail y prend le NOM DU
-  FICHIER comme objet (d'où `shareFileName(objet)`) et perd les retours à la ligne. Android
-  (appli autonome) : partage en premier. Ordinateur : PDF à enregistrer puis liens web.
+  IMPOSSIBLE d'ouvrir Gmail avec à la fois l'adresse remplie ET le PDF joint (le lien de Gmail ne
+  transporte pas de fichier ; le menu de partage, seul à donner un fichier à Gmail, ne remplit pas
+  le destinataire). Étape « Envoie la facture » (`#stp-send`), deux façons :
+  1) en premier (appli autonome), « Gmail avec la facture jointe » (`share-mail`, nom de la
+  messagerie préférée) : partage du PDF + message, adresse copiée à coller ; Gmail y prend le NOM
+  DU FICHIER comme objet (d'où `shareFileName(objet)`) et met le message en un seul paragraphe ;
+  2) le mail tout prêt et mis en forme, sous-étapes a/b/c (`.subs`) : a. « Enregistrer la
+  facture » dans Fichiers (`#stp-pdf`), b. « Ouvrir Gmail » (`#stp-mail`) ouvre l'APPLI Gmail
+  (`googlegmail:///co?to=&cc=&subject=&body=`, corps en CRLF ; le lien web mail.google.com
+  n'ouvre sur iPhone que la boîte de réception), Mail = `mailto:` (messagerie par défaut),
+  Outlook = `ms-outlook://compose?…`, c. joindre le PDF avec le trombone (`attachHintHTML`, nom
+  du fichier rappelé). Android (appli autonome) : partage en premier. Ordinateur : PDF à
+  enregistrer puis liens web.
   Noms de PDF (`pdfName`) en caractères simples, « Facture FA-2026-005 - FAN'APA.pdf » : avec
   un accent ou une apostrophe typographique, Chromium sous Linux sans locale UTF-8 remplace le
   nom par « download ».

@@ -377,11 +377,15 @@ try {
   const gBody = decodeURIComponent(iosLinks[0].href.split('&body=')[1]);
   assert.ok(gBody.endsWith('Camille EXEMPLE\r\nFAN’APA – Activité Physique Adaptée\r\n06 01 02 03 04'), 'signature sans « Autonomie »');
   assert.doesNotMatch(gBody, /Autonomie/);
-  assert.match(await p3.textContent('#m-attach'), /Gmail ne la joint pas tout seul.*touche le trombone/);
+  assert.match(await p3.textContent('#m-attach'), /dans Gmail, touche le trombone/);
   assert.ok((await p3.textContent('#m-attach')).includes(file3), 'le nom du PDF à joindre est indiqué');
+  // En premier : Gmail avec la facture déjà jointe (menu de partage), seul bouton plein de l'étape
+  assert.equal(await p3.textContent('#stp-send [data-act="share-mail"]'), 'Gmail avec la facture jointe');
+  assert.match(await p3.textContent('#stp-send'), /L’adresse du client est copiée en même temps/);
+  assert.equal(await p3.$$eval('#stp-send .btn.navy', els => els.length), 1, 'un seul bouton principal');
   await p3.waitForTimeout(400);
   await p3.screenshot({ path: join(OUT, '10-iphone-envoi.png') });
-  await p3.$eval('#stp-mail', el => el.scrollIntoView({ block: 'center' }));
+  await p3.$eval('#stp-send', el => el.scrollIntoView({ block: 'start' }));
   await p3.waitForTimeout(200);
   await p3.screenshot({ path: join(OUT, '10b-iphone-envoi-gmail.png') });
   // Étape « Enregistre la facture dans Fichiers » : menu de partage avec le PDF seul
@@ -399,10 +403,8 @@ try {
   });
   await p3.waitForSelector('#stp-mail.done');
   assert.match(await p3.textContent('#m-attach'), /dans Mail, touche le texte du message/);
-  // Variante en un geste : PDF joint, objet et message ; l'adresse est copiée pour être collée
-  await p3.click('#stp-mail details.alt summary');
-  assert.equal(await p3.textContent('#m-send-label'), 'Envoyer à paul.durand@exemple.fr', 'le bouton annonce le destinataire');
-  await p3.click('[data-act="share-mail"]');
+  // « Gmail avec la facture jointe » : PDF joint, objet et message ; l'adresse est copiée pour être collée
+  await p3.click('#stp-send [data-act="share-mail"]');
   await p3.waitForFunction(() => window.__shared.length === 2);
   shared = (await p3.evaluate(() => window.__shared))[1];
   assert.equal(shared.files.length, 1);
@@ -411,14 +413,16 @@ try {
   assert.ok(shared.files[0].size > 50000);
   assert.match(shared.text, /^Bonjour M\. Paul Durand,/);
   assert.match(shared.title, /^Facture FA-\d{4}-001 – FAN’APA$/);
+  await p3.waitForSelector('#stp-send.done');
   await p3.click('.sheet [data-act="close"]');
   await p3.click('.tabs [data-go="factures"]');
   await p3.click(`.row[data-n="FA-${YEAR}-001"]`);
   await p3.click('.sheet [data-act="send"]');
   await p3.waitForSelector('#mail-links a');
   assert.deepEqual(await p3.$$eval('#mail-links a', as => as.map(a => a.dataset.mailer)), ['mail', 'gmail', 'outlook'], 'messagerie préférée en premier');
+  assert.equal(await p3.textContent('#stp-send [data-act="share-mail"]'), 'Mail avec la facture jointe');
   await p3.click('.sheet [data-act="close"]');
-  step('iPhone : « Ouvrir Gmail » ouvre l’appli Gmail avec l’adresse du client, l’objet et le message mis en forme ; PDF enregistré dans Fichiers ; partage en un geste en variante');
+  step('iPhone : « Gmail avec la facture jointe » en premier (PDF joint, adresse copiée) ; ou mail tout prêt : Fichiers, appli Gmail remplie, trombone');
 
   /* ================= 4. iPhone, appli installée encore vide : récupérer ce qui a été saisi dans Safari ================= */
   const ctx4 = await browser.newContext({ ...iphone, locale: 'fr-FR' });
